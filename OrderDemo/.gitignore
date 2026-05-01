@@ -1,0 +1,11 @@
+## .NET
+bin/
+obj/
+*.db
+*.user
+.vs/
+
+## Node / Vue
+node_modules/
+dist/
+.env.local

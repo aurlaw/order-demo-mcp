@@ -1,5 +1,9 @@
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
+
+const token           = ref(localStorage.getItem('token') || null)
+const isAuthenticated = computed(() => !!token.value)
+const loginForm       = reactive({ username: '', password: '', loading: false, error: null })
 
 const orders = ref([])
 const loading = ref(false)
@@ -20,7 +24,10 @@ async function fetchOrders() {
     if (applied.from) params.set('from', applied.from)
     if (applied.to) params.set('to', applied.to)
 
-    const res = await fetch(`/api/orders?${params}`)
+    const res = await fetch(`/api/orders?${params}`, {
+      headers: { Authorization: `Bearer ${token.value}` }
+    })
+    if (res.status === 401) { logout(); return }
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json()
 
@@ -32,6 +39,33 @@ async function fetchOrders() {
   } finally {
     loading.value = false
   }
+}
+
+async function login() {
+  loginForm.loading = true
+  loginForm.error   = null
+  try {
+    const res = await fetch('/api/auth/login', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ username: loginForm.username, password: loginForm.password })
+    })
+    if (!res.ok) throw new Error('Invalid username or password')
+    const data   = await res.json()
+    token.value  = data.token
+    localStorage.setItem('token', data.token)
+    fetchOrders()
+  } catch (e) {
+    loginForm.error = e.message
+  } finally {
+    loginForm.loading = false
+  }
+}
+
+function logout() {
+  token.value = null
+  localStorage.removeItem('token')
+  orders.value = []
 }
 
 function applyFilters() {
@@ -86,82 +120,119 @@ function pageWindow() {
   return pages
 }
 
-onMounted(fetchOrders)
+onMounted(() => { if (isAuthenticated.value) fetchOrders() })
 </script>
 
 <template>
-  <header>
-    <h1>Order Dashboard</h1>
-    <span class="badge">{{ pagination.totalCount.toLocaleString() }} orders</span>
-  </header>
-
-  <main>
-    <div class="card filter-bar">
-      <input v-model="filters.lastName" type="text" placeholder="Last name…" />
-      <input v-model="filters.from" type="date" />
-      <input v-model="filters.to" type="date" />
-      <button class="btn-primary" @click="applyFilters">Apply</button>
-      <button class="btn-secondary" @click="clearFilters">Clear</button>
-    </div>
-
-    <div class="card">
-      <div v-if="loading" class="state-msg">Loading…</div>
-      <div v-else-if="error" class="state-msg error">Error: {{ error }}</div>
-      <div v-else>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Order #</th>
-                <th>Date</th>
-                <th>Customer</th>
-                <th>Email</th>
-                <th>Items</th>
-                <th class="right">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-if="orders.length === 0">
-                <td colspan="6" class="empty">No orders found.</td>
-              </tr>
-              <tr v-for="order in orders" :key="order.id">
-                <td class="mono">{{ order.orderNumber }}</td>
-                <td>{{ formatDate(order.orderDate) }}</td>
-                <td>{{ order.customer.firstName }} {{ order.customer.lastName }}</td>
-                <td class="muted">{{ order.customer.email }}</td>
-                <td><span class="pill">{{ order.lines.length }}</span></td>
-                <td class="right bold tabular">{{ formatCurrency(order.total) }}</td>
-              </tr>
-            </tbody>
-          </table>
+  <div v-if="!isAuthenticated" class="login-wrapper">
+    <div class="login-card">
+      <h1>Order Demo</h1>
+      <p class="login-subtitle">Sign in to continue</p>
+      <form @submit.prevent="login">
+        <div class="field">
+          <label>Username</label>
+          <input v-model="loginForm.username" type="text" autocomplete="username" required />
         </div>
+        <div class="field">
+          <label>Password</label>
+          <input v-model="loginForm.password" type="password" autocomplete="current-password" required />
+        </div>
+        <p v-if="loginForm.error" class="login-error">{{ loginForm.error }}</p>
+        <button type="submit" class="btn-primary full-width" :disabled="loginForm.loading">
+          {{ loginForm.loading ? 'Signing in…' : 'Sign In' }}
+        </button>
+      </form>
+    </div>
+  </div>
 
-        <div class="pagination">
-          <button :disabled="pagination.page <= 1" @click="goToPage(pagination.page - 1)">‹</button>
-          <template v-for="p in pageWindow()" :key="p">
-            <span v-if="p === '...'" class="ellipsis">…</span>
-            <button v-else :class="{ active: p === pagination.page }" @click="goToPage(p)">{{ p }}</button>
-          </template>
-          <button :disabled="pagination.page >= pagination.totalPages" @click="goToPage(pagination.page + 1)">›</button>
-          <span class="page-label">Page {{ pagination.page }} of {{ pagination.totalPages }}</span>
+  <template v-if="isAuthenticated">
+    <header>
+      <div class="header-inner">
+        <h1>Order Dashboard</h1>
+        <div class="header-right">
+          <span v-if="!loading" class="badge">{{ pagination.totalCount.toLocaleString() }} orders</span>
+          <button class="btn-ghost" @click="logout">Sign Out</button>
         </div>
       </div>
-    </div>
-  </main>
+    </header>
+
+    <main>
+      <div class="card filter-bar">
+        <input v-model="filters.lastName" type="text" placeholder="Last name…" />
+        <input v-model="filters.from" type="date" />
+        <input v-model="filters.to" type="date" />
+        <button class="btn-primary" @click="applyFilters">Apply</button>
+        <button class="btn-secondary" @click="clearFilters">Clear</button>
+      </div>
+
+      <div class="card">
+        <div v-if="loading" class="state-msg">Loading…</div>
+        <div v-else-if="error" class="state-msg error">Error: {{ error }}</div>
+        <div v-else>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Order #</th>
+                  <th>Date</th>
+                  <th>Customer</th>
+                  <th>Email</th>
+                  <th>Items</th>
+                  <th class="right">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-if="orders.length === 0">
+                  <td colspan="6" class="empty">No orders found.</td>
+                </tr>
+                <tr v-for="order in orders" :key="order.id">
+                  <td class="mono">{{ order.orderNumber }}</td>
+                  <td>{{ formatDate(order.orderDate) }}</td>
+                  <td>{{ order.customer.firstName }} {{ order.customer.lastName }}</td>
+                  <td class="muted">{{ order.customer.email }}</td>
+                  <td><span class="pill">{{ order.lines.length }}</span></td>
+                  <td class="right bold tabular">{{ formatCurrency(order.total) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="pagination">
+            <button :disabled="pagination.page <= 1" @click="goToPage(pagination.page - 1)">‹</button>
+            <template v-for="p in pageWindow()" :key="p">
+              <span v-if="p === '...'" class="ellipsis">…</span>
+              <button v-else :class="{ active: p === pagination.page }" @click="goToPage(p)">{{ p }}</button>
+            </template>
+            <button :disabled="pagination.page >= pagination.totalPages" @click="goToPage(pagination.page + 1)">›</button>
+            <span class="page-label">Page {{ pagination.page }} of {{ pagination.totalPages }}</span>
+          </div>
+        </div>
+      </div>
+    </main>
+  </template>
 </template>
 
 <style scoped>
 header {
+  padding: 24px 32px 0;
+}
+
+.header-inner {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 24px 32px 0;
+  justify-content: space-between;
 }
 
 header h1 {
   font-size: 1.5rem;
   font-weight: 700;
   color: #1e293b;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .badge {
@@ -227,6 +298,11 @@ main {
   background: #4f46e5;
 }
 
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .btn-secondary {
   background: #f1f5f9;
   color: #475569;
@@ -235,6 +311,20 @@ main {
 
 .btn-secondary:hover {
   background: #e2e8f0;
+}
+
+.btn-ghost {
+  background: none;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 0.875rem;
+  color: #475569;
+  cursor: pointer;
+}
+
+.btn-ghost:hover {
+  background: #f1f5f9;
 }
 
 .state-msg {
@@ -365,5 +455,77 @@ tbody td {
   margin-left: 8px;
   font-size: 0.8125rem;
   color: #64748b;
+}
+
+/* Login */
+.login-wrapper {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.login-card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 40px;
+  width: 100%;
+  max-width: 380px;
+}
+
+.login-card h1 {
+  font-size: 22px;
+  font-weight: 700;
+  color: #0f172a;
+  margin-bottom: 4px;
+}
+
+.login-subtitle {
+  color: #64748b;
+  font-size: 14px;
+  margin-bottom: 28px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+
+.field label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.field input {
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 14px;
+  color: #1e293b;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.field input:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+}
+
+.login-error {
+  font-size: 13px;
+  color: #dc2626;
+  margin-bottom: 12px;
+}
+
+.full-width {
+  width: 100%;
+  margin-top: 4px;
 }
 </style>

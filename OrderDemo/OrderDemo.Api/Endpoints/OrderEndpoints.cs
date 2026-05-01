@@ -56,6 +56,6 @@ public static class OrderEndpoints
         .WithName("GetOrders")
         .WithSummary("Get paginated orders")
         .WithDescription("Returns paginated orders. Filter by customer last name and/or date range.")
-        .WithOpenApi();
+        .RequireAuthorization();
     }
 }

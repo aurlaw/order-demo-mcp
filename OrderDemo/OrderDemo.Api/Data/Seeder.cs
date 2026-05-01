@@ -1,10 +1,15 @@
+using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Configuration;
 using OrderDemo.Api.Models;
 
 namespace OrderDemo.Api.Data;
 
 public static class Seeder
 {
-    public static void Seed(AppDbContext context)
+    public static async Task SeedAsync(
+        AppDbContext context,
+        UserManager<IdentityUser> userManager,
+        IConfiguration config)
     {
         if (context.Customers.Any()) return;
 
@@ -128,5 +133,18 @@ public static class Seeder
         context.Orders.AddRange(orders);
         context.OrderLines.AddRange(orderLines);
         context.SaveChanges();
+
+        // Admin user — runs only on first seed (guard above ensures this)
+        var username = config["AdminUser:Username"] ?? "admin";
+        var password = config["AdminUser:Password"] ?? "Admin@demo1!";
+
+        var user = new IdentityUser
+        {
+            UserName       = username,
+            Email          = $"{username}@demo.local",
+            EmailConfirmed = true
+        };
+
+        await userManager.CreateAsync(user, password);
     }
 }

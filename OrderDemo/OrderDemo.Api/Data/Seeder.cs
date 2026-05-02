@@ -146,5 +146,19 @@ public static class Seeder
         };
 
         await userManager.CreateAsync(user, password);
+
+        var mcpUsername = config["McpUser:Username"] ?? "mcp";
+        var mcpPassword = config["McpUser:Password"] ?? "Mcp@service1!";
+
+        if (await userManager.FindByNameAsync(mcpUsername) is null)
+        {
+            var mcpUser = new IdentityUser
+            {
+                UserName       = mcpUsername,
+                Email          = $"{mcpUsername}@demo.local",
+                EmailConfirmed = true
+            };
+            await userManager.CreateAsync(mcpUser, mcpPassword);
+        }
     }
 }

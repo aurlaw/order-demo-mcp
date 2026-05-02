@@ -52,3 +52,8 @@ Minimal API endpoints should not use deprecated WithOpenApi()
 ### EF Core / SQLite note
 
 `GroupBy` with aggregates (`Sum`, `Count`) on SQLite requires breaking into two queries — one to aggregate by ID, a second to hydrate the entity details — to avoid EF Core translation failures. See `GetTopCustomersAsync` in `OrderService.cs` for the established pattern.
+
+
+### MCP Server
+
+We do not need to use the /mcp endpoint

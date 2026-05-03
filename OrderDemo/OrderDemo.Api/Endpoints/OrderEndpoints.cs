@@ -33,6 +33,24 @@ public static class OrderEndpoints
         .WithDescription("Returns customers ranked by total spend within an optional date range.")
         .RequireAuthorization();
 
+        app.MapGet("/orders/cursor", async (
+            OrderService orderService,
+            string?   cursor   = null,
+            int       pageSize = 20,
+            string?   lastName = null,
+            DateTime? from     = null,
+            DateTime? to       = null) =>
+        {
+            var result = await orderService.GetOrdersWithCursorAsync(
+                cursor, pageSize, lastName, from, to);
+            return Results.Ok(result);
+        })
+        .WithName("GetOrdersCursor")
+        .WithSummary("Get orders using cursor-based pagination")
+        .WithDescription("Keyset pagination. Pass nextCursor from the previous response for the next page. " +
+                         "Null nextCursor indicates no more results.")
+        .RequireAuthorization();
+
         app.MapGet("/orders/{orderNumber}", async (
             string       orderNumber,
             OrderService orderService) =>

@@ -1,6 +1,6 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using System.Text.Json;
+using OrderDemo.Core.DTOs;
 
 namespace OrderDemo.Mcp.Services;
 
@@ -11,10 +11,7 @@ public class ApiClient(HttpClient httpClient, IConfiguration config)
 
     private record LoginResponse(string Token, DateTime ExpiresAt);
 
-    public async Task InitializeAsync()
-    {
-        await RefreshTokenAsync();
-    }
+    public async Task InitializeAsync() => await RefreshTokenAsync();
 
     private async Task EnsureTokenAsync()
     {
@@ -42,44 +39,50 @@ public class ApiClient(HttpClient httpClient, IConfiguration config)
             new AuthenticationHeaderValue("Bearer", _token);
     }
 
-    public async Task<JsonElement> GetOrdersAsync(
-        string? lastName, string? from, string? to, int page, int pageSize)
+    public async Task<CursorPagedResult<OrderDto>> GetOrdersWithCursorAsync(
+        string? cursor, int pageSize, string? lastName, string? from, string? to)
     {
         await EnsureTokenAsync();
         var qs = BuildQueryString(
-            ("page",     page.ToString()),
             ("pageSize", pageSize.ToString()),
+            ("cursor",   cursor),
             ("lastName", lastName),
             ("from",     from),
             ("to",       to));
-
-        return await httpClient.GetFromJsonAsync<JsonElement>($"/orders{qs}");
+        return await httpClient.GetFromJsonAsync<CursorPagedResult<OrderDto>>(
+            $"/orders/cursor{qs}")
+            ?? throw new InvalidOperationException("Empty response from cursor endpoint.");
     }
 
-    public async Task<JsonElement?> GetOrderByNumberAsync(string orderNumber)
+    public async Task<OrderDto?> GetOrderByNumberAsync(string orderNumber)
     {
         await EnsureTokenAsync();
-        var response = await httpClient.GetAsync($"/orders/{Uri.EscapeDataString(orderNumber)}");
+        var response = await httpClient.GetAsync(
+            $"/orders/{Uri.EscapeDataString(orderNumber)}");
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound) return null;
         response.EnsureSuccessStatusCode();
-        return await response.Content.ReadFromJsonAsync<JsonElement>();
+        return await response.Content.ReadFromJsonAsync<OrderDto>();
     }
 
-    public async Task<JsonElement> GetOrderStatsAsync(string? from, string? to)
+    public async Task<OrderStatsDto> GetOrderStatsAsync(string? from, string? to)
     {
         await EnsureTokenAsync();
         var qs = BuildQueryString(("from", from), ("to", to));
-        return await httpClient.GetFromJsonAsync<JsonElement>($"/orders/stats{qs}");
+        return await httpClient.GetFromJsonAsync<OrderStatsDto>($"/orders/stats{qs}")
+            ?? throw new InvalidOperationException("Empty response from stats endpoint.");
     }
 
-    public async Task<JsonElement> GetTopCustomersAsync(string? from, string? to, int limit)
+    public async Task<IEnumerable<TopCustomerDto>> GetTopCustomersAsync(
+        string? from, string? to, int limit)
     {
         await EnsureTokenAsync();
         var qs = BuildQueryString(
             ("from",  from),
             ("to",    to),
             ("limit", limit.ToString()));
-        return await httpClient.GetFromJsonAsync<JsonElement>($"/orders/top-customers{qs}");
+        return await httpClient.GetFromJsonAsync<IEnumerable<TopCustomerDto>>(
+            $"/orders/top-customers{qs}")
+            ?? [];
     }
 
     private static string BuildQueryString(params (string Key, string? Value)[] pairs)

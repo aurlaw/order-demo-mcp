@@ -1,4 +1,5 @@
 using ModelContextProtocol.AspNetCore;
+using OrderDemo.Mcp.Prompts;
 using OrderDemo.Mcp.Services;
 using OrderDemo.Mcp.Tools;
 
@@ -10,7 +11,8 @@ builder.Services.AddHttpClient<ApiClient>(client =>
 
 var mcpBuilder = builder.Services
     .AddMcpServer()
-    .WithToolsFromAssembly(typeof(OrderTools).Assembly);
+    .WithTools<OrderTools>()
+    .WithPrompts<OrderPrompts>();
 
 if (useStdio)
     mcpBuilder.WithStdioServerTransport();

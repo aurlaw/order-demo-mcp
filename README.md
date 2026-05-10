@@ -1,6 +1,6 @@
 # Order Demo
 
-Monorepo: .NET 10 Minimal API + MCP + Vue 3 dashboard + MCP server.
+Monorepo: .NET 10 Minimal API + Vue 3 dashboard + MCP server.
 
 ## First-time setup
 
@@ -42,7 +42,7 @@ dotnet run
 # MCP server
 cd OrderDemo/OrderDemo.Mcp
 dotnet run
-# → http://localhost:5010/mcp
+# → http://localhost:5010
 
 # Vue frontend
 cd OrderDemo/OrderDemo.Web

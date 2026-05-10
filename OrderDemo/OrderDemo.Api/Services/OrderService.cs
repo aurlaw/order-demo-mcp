@@ -7,10 +7,8 @@ using System.Text.Json;
 
 namespace OrderDemo.Api.Services;
 
-public class OrderService(AppDbContext db)
+public class OrderService(AppDbContext db, ILogger<OrderService> logger)
 {
-    // ── Shared query builder ─────────────────────────────────────────
-
     private IQueryable<Order> BuildOrderQuery(
         string? lastName, DateTime? from, DateTime? to)
     {
@@ -28,8 +26,6 @@ public class OrderService(AppDbContext db)
 
         return query;
     }
-
-    // ── Shared projection ────────────────────────────────────────────
 
     private static OrderDto ProjectOrder(Order o) => new(
         o.Id,
@@ -49,11 +45,14 @@ public class OrderService(AppDbContext db)
                 l.Product.Name,
                 l.Product.Price))));
 
-    // ── Offset pagination (Vue / REST) ───────────────────────────────
-
     public async Task<PagedResult<OrderDto>> GetOrdersAsync(
         int page, int pageSize, string? lastName, DateTime? from, DateTime? to)
     {
+        logger.LogDebug(
+            "Fetching orders page {Page} of size {PageSize} with filters " +
+            "lastName={LastName} from={From} to={To}",
+            page, pageSize, lastName, from, to);
+
         var query      = BuildOrderQuery(lastName, from, to);
         var totalCount = await query.CountAsync();
         var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
@@ -67,10 +66,12 @@ public class OrderService(AppDbContext db)
 
         var items = raw.Select(ProjectOrder).ToList();
 
+        logger.LogInformation(
+            "Orders query returned {Count} of {Total} results",
+            items.Count, totalCount);
+
         return new PagedResult<OrderDto>(items, totalCount, page, pageSize, totalPages);
     }
-
-    // ── Cursor / keyset pagination (MCP) ─────────────────────────────
 
     public async Task<CursorPagedResult<OrderDto>> GetOrdersWithCursorAsync(
         string?   cursor,
@@ -79,6 +80,11 @@ public class OrderService(AppDbContext db)
         DateTime? from,
         DateTime? to)
     {
+        logger.LogDebug(
+            "Cursor orders query pageSize={PageSize} hasCursor={HasCursor} " +
+            "lastName={LastName} from={From} to={To}",
+            pageSize, cursor is not null, lastName, from, to);
+
         var query = BuildOrderQuery(lastName, from, to);
 
         if (cursor is not null)
@@ -89,7 +95,6 @@ public class OrderService(AppDbContext db)
                 (o.OrderDate == decoded.LastOrderDate && o.Id < decoded.LastOrderId));
         }
 
-        // Fetch one extra to determine whether more pages exist
         var raw = await query
             .OrderByDescending(o => o.OrderDate)
             .ThenByDescending(o => o.Id)
@@ -105,25 +110,36 @@ public class OrderService(AppDbContext db)
             nextCursor = EncodeCursor(
                 new OrderCursor(pageItems.Last().OrderDate, pageItems.Last().Id));
 
+        logger.LogInformation(
+            "Cursor query returned {Count} items hasMore={HasMore}",
+            pageItems.Count, hasMore);
+
         return new CursorPagedResult<OrderDto>(pageItems, nextCursor, hasMore);
     }
 
-    // ── Single order ─────────────────────────────────────────────────
-
     public async Task<OrderDto?> GetOrderByNumberAsync(string orderNumber)
     {
+        logger.LogDebug("Looking up order {OrderNumber}", orderNumber);
+
         var order = await db.Orders
             .Include(o => o.Customer)
             .Include(o => o.Lines).ThenInclude(l => l.Product)
             .FirstOrDefaultAsync(o => o.OrderNumber == orderNumber);
 
-        return order is null ? null : ProjectOrder(order);
-    }
+        if (order is null)
+        {
+            logger.LogWarning("Order not found: {OrderNumber}", orderNumber);
+            return null;
+        }
 
-    // ── Stats ────────────────────────────────────────────────────────
+        logger.LogDebug("Order {OrderNumber} found", orderNumber);
+        return ProjectOrder(order);
+    }
 
     public async Task<OrderStatsDto> GetStatsAsync(DateTime? from, DateTime? to)
     {
+        logger.LogDebug("Computing order stats from={From} to={To}", from, to);
+
         var query = db.Orders.AsQueryable();
 
         if (from.HasValue) query = query.Where(o => o.OrderDate >= from.Value);
@@ -133,14 +149,22 @@ public class OrderService(AppDbContext db)
         var totalValue  = totalOrders > 0 ? await query.SumAsync(o => o.Total) : 0m;
         var avgValue    = totalOrders > 0 ? Math.Round(totalValue / totalOrders, 2) : 0m;
 
-        return new OrderStatsDto(totalOrders, Math.Round(totalValue, 2), avgValue, from, to);
-    }
+        var stats = new OrderStatsDto(totalOrders, Math.Round(totalValue, 2), avgValue, from, to);
 
-    // ── Top customers ────────────────────────────────────────────────
+        logger.LogInformation(
+            "Stats computed: {TotalOrders} orders totalling {TotalValue:C}",
+            stats.TotalOrders, stats.TotalValue);
+
+        return stats;
+    }
 
     public async Task<IEnumerable<TopCustomerDto>> GetTopCustomersAsync(
         DateTime? from, DateTime? to, int limit)
     {
+        logger.LogDebug(
+            "Fetching top {Limit} customers from={From} to={To}",
+            limit, from, to);
+
         var query = db.Orders.AsQueryable();
 
         if (from.HasValue) query = query.Where(o => o.OrderDate >= from.Value);
@@ -163,16 +187,19 @@ public class OrderService(AppDbContext db)
             .Where(c => customerIds.Contains(c.Id))
             .ToDictionaryAsync(c => c.Id);
 
-        return grouped.Select(g => new TopCustomerDto(
+        var result = grouped.Select(g => new TopCustomerDto(
             g.CustomerId,
             customers[g.CustomerId].FirstName,
             customers[g.CustomerId].LastName,
             customers[g.CustomerId].Email,
             g.OrderCount,
-            Math.Round(g.TotalSpend, 2)));
-    }
+            Math.Round(g.TotalSpend, 2))).ToList();
 
-    // ── Cursor helpers ───────────────────────────────────────────────
+        logger.LogInformation(
+            "Top customers query returned {Count} results", result.Count);
+
+        return result;
+    }
 
     private static string EncodeCursor(OrderCursor cursor) =>
         Convert.ToBase64String(

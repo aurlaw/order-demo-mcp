@@ -2,28 +2,61 @@ using ModelContextProtocol.AspNetCore;
 using OrderDemo.Mcp.Prompts;
 using OrderDemo.Mcp.Services;
 using OrderDemo.Mcp.Tools;
+using Serilog;
 
-var builder  = WebApplication.CreateBuilder(args);
-var useStdio = args.Contains("--stdio");
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.Console()
+    .CreateBootstrapLogger();
 
-builder.Services.AddHttpClient<ApiClient>(client =>
-    client.BaseAddress = new Uri(builder.Configuration["ApiClient:BaseUrl"]!));
+try
+{
+    var builder  = WebApplication.CreateBuilder(args);
+    var useStdio = args.Contains("--stdio");
 
-var mcpBuilder = builder.Services
-    .AddMcpServer()
-    .WithTools<OrderTools>()
-    .WithPrompts<OrderPrompts>();
+    builder.Host.UseSerilog((context, services, config) =>
+    {
+        var logConfig = config
+            .ReadFrom.Configuration(context.Configuration)
+            .ReadFrom.Services(services)
+            .Enrich.FromLogContext()
+            .Enrich.WithEnvironmentName()
+            .Enrich.WithThreadId();
 
-if (useStdio)
-    mcpBuilder.WithStdioServerTransport();
-else
-    mcpBuilder.WithHttpTransport();
+        if (useStdio)
+            logConfig.WriteTo.Console(
+                outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}",
+                standardErrorFromLevel: Serilog.Events.LogEventLevel.Verbose);
+        else
+            logConfig.WriteTo.Console(new Serilog.Formatting.Json.JsonFormatter());
+    });
 
-var app = builder.Build();
+    builder.Services.AddHttpClient<ApiClient>(client =>
+        client.BaseAddress = new Uri(builder.Configuration["ApiClient:BaseUrl"]!));
 
-await app.Services.GetRequiredService<ApiClient>().InitializeAsync();
+    var mcpBuilder = builder.Services
+        .AddMcpServer()
+        .WithTools<OrderTools>()
+        .WithPrompts<OrderPrompts>();
 
-if (!useStdio)
-    app.MapMcp();
+    if (useStdio)
+        mcpBuilder.WithStdioServerTransport();
+    else
+        mcpBuilder.WithHttpTransport();
 
-await app.RunAsync();
+    var app = builder.Build();
+
+    await app.Services.GetRequiredService<ApiClient>().InitializeAsync();
+
+    if (!useStdio)
+        app.MapMcp();
+
+    await app.RunAsync();
+}
+catch (Exception ex)
+{
+    Log.Fatal(ex, "MCP server terminated unexpectedly");
+}
+finally
+{
+    Log.CloseAndFlush();
+}

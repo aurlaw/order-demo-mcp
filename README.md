@@ -1,8 +1,18 @@
 # Order Demo
 
-Monorepo: .NET 10 Minimal API + Vue 3 dashboard + MCP server.
+Monorepo: .NET 10 Minimal API + Vue 3 dashboard + MCP server, orchestrated locally with [Aspire](https://aspire.dev).
 
 ## First-time setup
+
+### 1. Install the Aspire CLI
+
+```bash
+curl -sSL https://aspire.dev/install.sh | bash
+```
+
+See [aspire.dev/docs/install](https://aspire.dev/docs/install) for other platforms. Once installed, verify with `aspire doctor` — the dashboard runs over HTTPS, so if the dev certificate is untrusted, run `aspire certs trust`.
+
+### 2. Set User Secrets
 
 Sensitive config — the JWT signing key and seeded user passwords — lives in [.NET User Secrets](https://learn.microsoft.com/en-us/aspnet/core/security/app-secrets), not `appsettings.json`. The committed `appsettings.json` files contain placeholder strings (`*** set via user secrets: <key> ***`) that document the shape of the config; the actual values must be set once per dev machine before either project will start cleanly.
 
@@ -22,16 +32,24 @@ dotnet user-secrets set "ApiClient:Password"  "Mcp@service1!"
 
 ## Quick start
 
-### All backend servers (recommended)
-
 ```bash
-cd OrderDemo
-./run.sh
+cd OrderDemo/OrderDemo.AppHost
+aspire start
 ```
 
-Starts `OrderDemo.Api` (port 5000) and `OrderDemo.Mcp` (port 5010) in sequence. The MCP server waits for the API to be ready before starting. Press `Ctrl+C` to stop both.
+`aspire start` boots all three services and the Aspire dashboard. The CLI prints a dashboard URL (with login token) — open it to see resources, logs, traces, and metrics.
 
-### Individual services
+| Resource | URL                            | Notes                                    |
+|----------|--------------------------------|------------------------------------------|
+| `api`    | http://localhost:5000          | REST API; `/scalar` for the API explorer |
+| `mcp`    | http://localhost:5010          | MCP server (Streamable HTTP)             |
+| `web`    | http://localhost:&lt;random&gt;          | Vue 3 dashboard — exact port shown in the Aspire dashboard; proxies `/api/*` to the API |
+
+`aspire stop` shuts everything down. `aspire describe` / `aspire logs <resource>` are useful while it's running.
+
+### Without Aspire (fallback)
+
+Run the services directly when debugging a single project or running without the Aspire CLI:
 
 ```bash
 # API
@@ -51,6 +69,8 @@ npm run dev
 # → http://localhost:5173
 ```
 
+`OrderDemo/run.sh` starts the Api and Mcp together in this mode (no dashboard, no telemetry).
+
 ## MCP (Claude.ai — Custom Connector)
 
 Claude.ai connects to local MCP servers via a public tunnel. This demo uses [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) to create one.
@@ -67,7 +87,7 @@ brew install cloudflared
 ### 2. Start the servers
 
 ```bash
-cd OrderDemo && ./run.sh
+cd OrderDemo/OrderDemo.AppHost && aspire start
 ```
 
 ### 3. Start the tunnel

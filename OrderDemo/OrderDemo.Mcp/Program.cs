@@ -17,6 +17,8 @@ try
     var builder  = WebApplication.CreateBuilder(args);
     var useStdio = args.Contains("--stdio");
 
+    builder.AddServiceDefaults();
+
     builder.Host.UseSerilog((context, services, config) =>
     {
         var logConfig = config

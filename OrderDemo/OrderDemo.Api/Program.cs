@@ -21,6 +21,8 @@ try
 {
     var builder = WebApplication.CreateBuilder(args);
 
+    builder.AddServiceDefaults();
+
     builder.Host.UseSerilog((context, services, config) =>
         config
             .ReadFrom.Configuration(context.Configuration)

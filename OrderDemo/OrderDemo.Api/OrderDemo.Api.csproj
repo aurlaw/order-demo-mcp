@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\OrderDemo.Core\OrderDemo.Core.csproj" />
+    <ProjectReference Include="..\OrderDemo.ServiceDefaults\OrderDemo.ServiceDefaults.csproj" />
   </ItemGroup>
 
 </Project>

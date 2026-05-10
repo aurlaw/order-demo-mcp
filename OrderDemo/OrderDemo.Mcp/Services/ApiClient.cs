@@ -122,6 +122,38 @@ public class ApiClient(
         return await response.Content.ReadFromJsonAsync<OrderDto>();
     }
 
+    public async Task<CustomerSummaryDto?> GetCustomerSummaryAsync(int customerId)
+    {
+        logger.LogDebug("Calling API customer summary for CustomerId={CustomerId}", customerId);
+
+        await EnsureTokenAsync();
+        AttachCorrelationHeader();
+
+        var response = await httpClient.GetAsync($"/customers/{customerId}/summary");
+
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            logger.LogWarning("Customer summary not found via API: {CustomerId}", customerId);
+            return null;
+        }
+
+        try
+        {
+            response.EnsureSuccessStatusCode();
+        }
+        catch (HttpRequestException ex)
+        {
+            logger.LogError(ex,
+                "API call failed: {Method} {Url} returned {StatusCode}",
+                response.RequestMessage?.Method,
+                response.RequestMessage?.RequestUri,
+                (int)response.StatusCode);
+            throw;
+        }
+
+        return await response.Content.ReadFromJsonAsync<CustomerSummaryDto>();
+    }
+
     public async Task<OrderStatsDto> GetOrderStatsAsync(string? from, string? to)
     {
         logger.LogDebug("Calling API orders/stats from={From} to={To}", from, to);

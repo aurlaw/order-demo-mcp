@@ -201,6 +201,42 @@ public class OrderService(AppDbContext db, ILogger<OrderService> logger)
         return result;
     }
 
+    public async Task<CustomerSummaryDto?> GetCustomerSummaryAsync(int customerId)
+    {
+        logger.LogDebug("Fetching customer summary for CustomerId={CustomerId}", customerId);
+
+        var customer = await db.Customers.FindAsync(customerId);
+        if (customer is null)
+        {
+            logger.LogWarning("Customer not found: {CustomerId}", customerId);
+            return null;
+        }
+
+        var orders = await db.Orders
+            .Where(o => o.CustomerId == customerId)
+            .ToListAsync();
+
+        if (orders.Count == 0)
+            return new CustomerSummaryDto(
+                customer.Id,
+                customer.FirstName,
+                customer.LastName,
+                customer.Email,
+                0, 0m,
+                DateTime.MinValue,
+                DateTime.MinValue);
+
+        return new CustomerSummaryDto(
+            customer.Id,
+            customer.FirstName,
+            customer.LastName,
+            customer.Email,
+            orders.Count,
+            Math.Round(orders.Sum(o => o.Total), 2),
+            orders.Min(o => o.OrderDate),
+            orders.Max(o => o.OrderDate));
+    }
+
     private static string EncodeCursor(OrderCursor cursor) =>
         Convert.ToBase64String(
             Encoding.UTF8.GetBytes(JsonSerializer.Serialize(cursor)));

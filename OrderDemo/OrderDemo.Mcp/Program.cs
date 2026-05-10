@@ -3,6 +3,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using ModelContextProtocol.AspNetCore;
 using OrderDemo.Mcp.HealthChecks;
 using OrderDemo.Mcp.Prompts;
+using OrderDemo.Mcp.Resources;
 using OrderDemo.Mcp.Services;
 using OrderDemo.Mcp.Tools;
 using Serilog;
@@ -50,7 +51,8 @@ try
     var mcpBuilder = builder.Services
         .AddMcpServer()
         .WithTools<OrderTools>()
-        .WithPrompts<OrderPrompts>();
+        .WithPrompts<OrderPrompts>()
+        .WithResources<OrderResources>();
 
     if (useStdio)
         mcpBuilder.WithStdioServerTransport();

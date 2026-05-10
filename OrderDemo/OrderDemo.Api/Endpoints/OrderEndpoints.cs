@@ -78,5 +78,17 @@ public static class OrderEndpoints
         .WithSummary("Get paginated orders")
         .WithDescription("Returns paginated orders. Filter by customer last name and/or date range.")
         .RequireAuthorization();
+
+        app.MapGet("/customers/{customerId:int}/summary", async (
+            int          customerId,
+            OrderService orderService) =>
+        {
+            var summary = await orderService.GetCustomerSummaryAsync(customerId);
+            return summary is null ? Results.NotFound() : Results.Ok(summary);
+        })
+        .WithName("GetCustomerSummary")
+        .WithSummary("Get order summary for a customer")
+        .WithDescription("Returns aggregate order data for a specific customer.")
+        .RequireAuthorization();
     }
 }

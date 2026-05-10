@@ -34,6 +34,16 @@ public record TopCustomerDto(
     int     OrderCount,
     decimal TotalSpend);
 
+public record CustomerSummaryDto(
+    int      CustomerId,
+    string   FirstName,
+    string   LastName,
+    string   Email,
+    int      TotalOrders,
+    decimal  TotalSpend,
+    DateTime FirstOrderDate,
+    DateTime LastOrderDate);
+
 public record OrderCursor(DateTime LastOrderDate, int LastOrderId);
 
 public record CursorPagedResult<T>(

@@ -2,6 +2,24 @@
 
 Monorepo: .NET 10 Minimal API + MCP + Vue 3 dashboard + MCP server.
 
+## First-time setup
+
+Sensitive config — the JWT signing key and seeded user passwords — lives in [.NET User Secrets](https://learn.microsoft.com/en-us/aspnet/core/security/app-secrets), not `appsettings.json`. The committed `appsettings.json` files contain placeholder strings (`*** set via user secrets: <key> ***`) that document the shape of the config; the actual values must be set once per dev machine before either project will start cleanly.
+
+```bash
+# OrderDemo.Api
+cd OrderDemo/OrderDemo.Api
+dotnet user-secrets set "Jwt:Secret"          "order-demo-secret-key-min-32-chars-long!"
+dotnet user-secrets set "AdminUser:Password"  "Admin@demo1!"
+dotnet user-secrets set "McpUser:Password"    "Mcp@service1!"
+
+# OrderDemo.Mcp
+cd ../OrderDemo.Mcp
+dotnet user-secrets set "ApiClient:Password"  "Mcp@service1!"
+```
+
+
+
 ## Quick start
 
 ### All backend servers (recommended)
@@ -96,6 +114,8 @@ Once the connector is active, try this in a Claude.ai conversation:
 | `mcp`   | `Mcp@service1!`  | MCP server (auto)|
 
 JWT tokens are valid for 8 hours. The MCP server authenticates automatically on startup.
+
+These passwords are loaded from User Secrets — see [First-time setup](#first-time-setup).
 
 ## MCP Inspector
 

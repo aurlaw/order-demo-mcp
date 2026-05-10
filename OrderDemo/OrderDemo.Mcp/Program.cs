@@ -1,4 +1,7 @@
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using ModelContextProtocol.AspNetCore;
+using OrderDemo.Mcp.HealthChecks;
 using OrderDemo.Mcp.Prompts;
 using OrderDemo.Mcp.Services;
 using OrderDemo.Mcp.Tools;
@@ -33,6 +36,17 @@ try
     builder.Services.AddHttpClient<ApiClient>(client =>
         client.BaseAddress = new Uri(builder.Configuration["ApiClient:BaseUrl"]!));
 
+    builder.Services.AddHttpClient("health", client =>
+    {
+        client.Timeout = TimeSpan.FromSeconds(5);
+    });
+
+    builder.Services.AddHealthChecks()
+        .AddCheck<ApiHealthCheck>(
+            name: "api",
+            failureStatus: HealthStatus.Degraded,
+            tags: ["api", "upstream"]);
+
     var mcpBuilder = builder.Services
         .AddMcpServer()
         .WithTools<OrderTools>()
@@ -48,9 +62,38 @@ try
     await app.Services.GetRequiredService<ApiClient>().InitializeAsync();
 
     if (!useStdio)
+    {
         app.MapMcp();
+        app.MapHealthChecks("/health", new HealthCheckOptions
+        {
+            ResponseWriter = WriteHealthResponse
+        });
+    }
 
     await app.RunAsync();
+
+    static async Task WriteHealthResponse(HttpContext context, HealthReport report)
+    {
+        context.Response.ContentType = "application/json";
+
+        var result = new
+        {
+            status      = report.Status.ToString(),
+            duration    = report.TotalDuration.TotalMilliseconds,
+            checks      = report.Entries.Select(e => new
+            {
+                name        = e.Key,
+                status      = e.Value.Status.ToString(),
+                duration    = e.Value.Duration.TotalMilliseconds,
+                description = e.Value.Description,
+                error       = e.Value.Exception?.Message
+            })
+        };
+
+        await context.Response.WriteAsync(
+            System.Text.Json.JsonSerializer.Serialize(result,
+                new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+    }
 }
 catch (Exception ex)
 {

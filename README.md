@@ -97,6 +97,12 @@ Once the connector is active, try this in a Claude.ai conversation:
 
 JWT tokens are valid for 8 hours. The MCP server authenticates automatically on startup.
 
+## MCP Inspector
+
+```bash
+npx @modelcontextprotocol/inspector@latest
+```
+
 ## Reset database
 
 ```bash

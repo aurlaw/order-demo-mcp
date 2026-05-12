@@ -18,7 +18,7 @@ When debugging a single service in isolation (no dashboard, no OTel), run it dir
 
 ```bash
 cd OrderDemo/OrderDemo.Api && dotnet run     # http://localhost:5000  (Scalar at /scalar)
-cd OrderDemo/OrderDemo.Mcp && dotnet run     # http://localhost:5010
+cd OrderDemo/OrderDemo.Mcp && dotnet run     # http://localhost:5010 — needs services__orderdemo-api__http__0=http://localhost:5000 in env to reach the API outside Aspire
 cd OrderDemo/OrderDemo.Web && npm run dev    # http://localhost:5173
 ```
 
@@ -39,7 +39,7 @@ Solution layout (`OrderDemo/OrderDemo.sln`):
 | `OrderDemo.Api` | .NET 10 Minimal API + EF Core + JWT auth + Serilog |
 | `OrderDemo.Mcp` | MCP server (Streamable HTTP at `/`, optional stdio with `--stdio`) — tools, prompts, resources, sampling |
 | `OrderDemo.Web` | Vue 3 + Vite dashboard; Vite proxies `/api/*` → `http://localhost:5000` |
-| `OrderDemo.AppHost` | Aspire AppHost — `AppHost.cs` wires `api` (pinned 5000), `mcp` (pinned 5010, `WithReference(api).WaitFor(api)`), `web` (`AddViteApp`, dynamic port) |
+| `OrderDemo.AppHost` | Aspire AppHost — `AppHost.cs` wires `orderdemo-api` (pinned 5000), `orderdemo-mcp` (pinned 5010, `WithReference(api).WaitFor(api)`), `web` (`AddJavaScriptApp`, pinned 5173) |
 | `OrderDemo.ServiceDefaults` | OTel tracing/metrics/logs, service discovery, HTTP resilience, `self` health check — referenced by Api and Mcp via `builder.AddServiceDefaults()` |
 
 ### API layer flow
@@ -59,7 +59,7 @@ Endpoints/*.cs  →  Services/OrderService.cs  →  Data/AppDbContext.cs  →  S
 
 ### MCP layer (`OrderDemo.Mcp`)
 
-- **`Services/ApiClient.cs`** — typed HTTP client; calls `EnsureTokenAsync()` + `AttachCorrelationHeader()` before each API call. Reads `ApiClient:BaseUrl` from config; the existing pin to `http://localhost:5000` matches the AppHost's Api endpoint, so no override is needed.
+- **`Services/ApiClient.cs`** — typed HTTP client; calls `EnsureTokenAsync()` + `AttachCorrelationHeader()` before each API call. Base address is `http://orderdemo-api` resolved via Aspire service discovery — only runs under Aspire (or with the env var set manually).
 - **`Tools/OrderTools.cs`** — five MCP tools returning `IEnumerable<ContentBlock>` (`search_orders`, `get_order_detail`, `get_order_stats`, `get_top_customers`, `generate_insights` — last one uses sampling).
 - **`Prompts/OrderPrompts.cs`** — four prompt templates (`monthly_order_summary`, `top_customers_report`, `order_lookup`, `daily_briefing`).
 - **`Resources/OrderResources.cs`** — two static (`orders://products/catalogue`, `orders://schema`) + one templated (`orders://customers/{id}/summary`).
@@ -90,5 +90,7 @@ Minimal API endpoints should not use deprecated WithOpenApi()
 ### Aspire constraints
 
 - Both .NET services use `launchProfileName: null` in `AppHost.cs` plus explicit `WithHttpEndpoint(port: …)` — this bypasses each project's `launchSettings.json` so port pinning is deterministic. Adding/renaming a launch profile won't change Aspire behaviour.
-- `OrderDemo.Web` uses `AddViteApp` and **must not** receive a `WithHttpEndpoint(...)` call — the Vite integration auto-registers an endpoint with a dynamic port (visible in the dashboard). The Api's CORS only allows `http://localhost:5173`, but Vue calls hit the API server-side through Vite's proxy, so CORS isn't exercised in dev.
-- ServiceDefaults' `MapDefaultEndpoints()` would map `/health` again and collide with the Phase 3e custom JSON health writer — it is intentionally **not** called in either service's `Program.cs`. The ServiceDefaults `self` check still appears as one of the entries in the existing `/health` payload.
+- `OrderDemo.Web` uses `AddJavaScriptApp("web", "../OrderDemo.Web", "dev")` with `WithHttpEndpoint(port: 5173, env: "PORT")` — Aspire injects the bound port as `PORT` into the npm process. (In `Aspire.Hosting.JavaScript` 13.3, `AddJavaScriptApp` is the rename of the older `AddNpmApp`.)
+- `vite.config.js` reads `services__orderdemo-api__http__0` via `loadEnv(mode, process.cwd(), '')` to pick up Aspire's injected service URL for the `/api` proxy. The env key uses bracket-notation access because of the embedded hyphen.
+- Both services call `app.MapDefaultEndpoints()` after `Build()` — that maps `/health` (all checks) and `/alive` (live-tagged checks). Do **not** also call `app.MapHealthChecks("/health", ...)`; it conflicts with the route registered by `MapDefaultEndpoints()`.
+- Serilog forwards logs to the Aspire dashboard via `Serilog.Sinks.OpenTelemetry` — the OTLP endpoint comes from `OTEL_EXPORTER_OTLP_ENDPOINT` (set by Aspire) with a `http://localhost:4317` fallback for standalone runs.

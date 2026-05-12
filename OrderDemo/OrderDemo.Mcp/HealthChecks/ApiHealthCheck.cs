@@ -4,7 +4,6 @@ namespace OrderDemo.Mcp.HealthChecks;
 
 public class ApiHealthCheck(
     IHttpClientFactory      httpClientFactory,
-    IConfiguration          config,
     ILogger<ApiHealthCheck> logger) : IHealthCheck
 {
     public async Task<HealthCheckResult> CheckHealthAsync(
@@ -15,11 +14,8 @@ public class ApiHealthCheck(
 
         try
         {
-            var baseUrl = config["ApiClient:BaseUrl"]
-                ?? throw new InvalidOperationException("ApiClient:BaseUrl not configured.");
-
             var client   = httpClientFactory.CreateClient("health");
-            var response = await client.GetAsync($"{baseUrl}/health", cancellationToken);
+            var response = await client.GetAsync("http://orderdemo-api/health", cancellationToken);
 
             if (!response.IsSuccessStatusCode)
             {

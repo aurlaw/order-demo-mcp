@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using ModelContextProtocol.AspNetCore;
 using OrderDemo.Mcp.HealthChecks;
@@ -17,6 +16,8 @@ try
     var builder  = WebApplication.CreateBuilder(args);
     var useStdio = args.Contains("--stdio");
 
+    builder.Configuration["UseStdio"] = useStdio.ToString();
+
     builder.AddServiceDefaults();
 
     builder.Host.UseSerilog((context, services, config) =>
@@ -26,23 +27,36 @@ try
             .ReadFrom.Services(services)
             .Enrich.FromLogContext()
             .Enrich.WithEnvironmentName()
-            .Enrich.WithThreadId();
+            .Enrich.WithThreadId()
+            .WriteTo.Console(new Serilog.Formatting.Json.JsonFormatter())
+            .WriteTo.OpenTelemetry(otel =>
+            {
+                otel.Endpoint = context.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]
+                    ?? "http://localhost:4317";
+                otel.Protocol = Serilog.Sinks.OpenTelemetry.OtlpProtocol.Grpc;
+                otel.ResourceAttributes = new Dictionary<string, object>
+                {
+                    ["service.name"] = context.HostingEnvironment.ApplicationName
+                };
+            });
 
-        if (useStdio)
+        if (context.Configuration.GetValue<bool>("UseStdio"))
             logConfig.WriteTo.Console(
                 outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}",
                 standardErrorFromLevel: Serilog.Events.LogEventLevel.Verbose);
-        else
-            logConfig.WriteTo.Console(new Serilog.Formatting.Json.JsonFormatter());
     });
 
     builder.Services.AddHttpClient<ApiClient>(client =>
-        client.BaseAddress = new Uri(builder.Configuration["ApiClient:BaseUrl"]!));
+        client.BaseAddress = new Uri("http://orderdemo-api"))
+        .AddServiceDiscovery()
+        .AddStandardResilienceHandler();
 
     builder.Services.AddHttpClient("health", client =>
     {
         client.Timeout = TimeSpan.FromSeconds(5);
-    });
+    })
+    .AddServiceDiscovery()
+    .AddStandardResilienceHandler();
 
     builder.Services.AddHealthChecks()
         .AddCheck<ApiHealthCheck>(
@@ -68,36 +82,10 @@ try
     if (!useStdio)
     {
         app.MapMcp();
-        app.MapHealthChecks("/health", new HealthCheckOptions
-        {
-            ResponseWriter = WriteHealthResponse
-        });
+        app.MapDefaultEndpoints();
     }
 
     await app.RunAsync();
-
-    static async Task WriteHealthResponse(HttpContext context, HealthReport report)
-    {
-        context.Response.ContentType = "application/json";
-
-        var result = new
-        {
-            status      = report.Status.ToString(),
-            duration    = report.TotalDuration.TotalMilliseconds,
-            checks      = report.Entries.Select(e => new
-            {
-                name        = e.Key,
-                status      = e.Value.Status.ToString(),
-                duration    = e.Value.Duration.TotalMilliseconds,
-                description = e.Value.Description,
-                error       = e.Value.Exception?.Message
-            })
-        };
-
-        await context.Response.WriteAsync(
-            System.Text.Json.JsonSerializer.Serialize(result,
-                new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
-    }
 }
 catch (Exception ex)
 {

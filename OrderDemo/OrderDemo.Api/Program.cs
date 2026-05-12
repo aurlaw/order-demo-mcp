@@ -3,7 +3,6 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
-using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using OrderDemo.Api.Data;
 using OrderDemo.Api.Endpoints;
@@ -24,13 +23,25 @@ try
     builder.AddServiceDefaults();
 
     builder.Host.UseSerilog((context, services, config) =>
+    {
         config
             .ReadFrom.Configuration(context.Configuration)
             .ReadFrom.Services(services)
             .Enrich.FromLogContext()
             .Enrich.WithEnvironmentName()
             .Enrich.WithThreadId()
-            .WriteTo.Console(new Serilog.Formatting.Json.JsonFormatter()));
+            .WriteTo.Console(new Serilog.Formatting.Json.JsonFormatter())
+            .WriteTo.OpenTelemetry(otel =>
+            {
+                otel.Endpoint = context.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]
+                    ?? "http://localhost:4317";
+                otel.Protocol = Serilog.Sinks.OpenTelemetry.OtlpProtocol.Grpc;
+                otel.ResourceAttributes = new Dictionary<string, object>
+                {
+                    ["service.name"] = context.HostingEnvironment.ApplicationName
+                };
+            });
+    });
 
     builder.Services.AddOpenApi();
 
@@ -111,35 +122,9 @@ try
     app.MapAuthEndpoints();
     app.MapOrderEndpoints();
 
-    app.MapHealthChecks("/health", new HealthCheckOptions
-    {
-        ResponseWriter = WriteHealthResponse
-    });
+    app.MapDefaultEndpoints();
 
     app.Run();
-
-    static async Task WriteHealthResponse(HttpContext context, HealthReport report)
-    {
-        context.Response.ContentType = "application/json";
-
-        var result = new
-        {
-            status      = report.Status.ToString(),
-            duration    = report.TotalDuration.TotalMilliseconds,
-            checks      = report.Entries.Select(e => new
-            {
-                name        = e.Key,
-                status      = e.Value.Status.ToString(),
-                duration    = e.Value.Duration.TotalMilliseconds,
-                description = e.Value.Description,
-                error       = e.Value.Exception?.Message
-            })
-        };
-
-        await context.Response.WriteAsync(
-            System.Text.Json.JsonSerializer.Serialize(result,
-                new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
-    }
 }
 catch (Exception ex)
 {

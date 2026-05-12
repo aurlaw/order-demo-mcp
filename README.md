@@ -28,7 +28,49 @@ cd ../OrderDemo.Mcp
 dotnet user-secrets set "ApiClient:Password"  "Mcp@service1!"
 ```
 
+### 3. Configure Auth0
 
+Auth0 brokers user login for the Vue dashboard and OAuth for the MCP server (Claude.ai Custom Connector). Set this up once in the [Auth0 dashboard](https://manage.auth0.com), then mirror the values into User Secrets and `.env.local`.
+
+**In the Auth0 dashboard, create:**
+
+| Resource | Type | Key settings |
+|----------|------|--------------|
+| `Order Demo API` | API | Identifier `https://api.orderdemo.dev`, RS256, permission `orders:read` |
+| `Order Demo SPA` | Single Page Application | Allowed Callback / Logout / Web Origins: `http://localhost:5173` |
+| `Order Demo MCP` | Regular Web Application | Allowed Callback URL: `https://<your-tunnel>.trycloudflare.com/callback` (update on each new tunnel) |
+| `Order Demo MCP Management` | Machine to Machine | Authorise against the **Auth0 Management API** with `create:clients`, `delete:clients`, `read:clients` |
+| Test user | Database connection | `Username-Password-Authentication` — used to log into the dashboard and Claude.ai connector |
+
+On the API, enable **Allow Skipping User Consent** for development, and ensure the SPA is authorised with the `orders:read` scope.
+
+**Then set the values:**
+
+```bash
+# OrderDemo.Api
+cd OrderDemo/OrderDemo.Api
+dotnet user-secrets set "Auth0:Domain"                  "<tenant>.us.auth0.com"
+dotnet user-secrets set "Auth0:Audience"                "https://api.orderdemo.dev"
+
+# OrderDemo.Mcp
+cd ../OrderDemo.Mcp
+dotnet user-secrets set "Auth0:Domain"                  "<tenant>.us.auth0.com"
+dotnet user-secrets set "Auth0:Audience"                "https://api.orderdemo.dev"
+dotnet user-secrets set "Auth0:Mcp:ClientId"            "<Order Demo MCP — Client ID>"
+dotnet user-secrets set "Auth0:Mcp:ClientSecret"        "<Order Demo MCP — Client Secret>"
+dotnet user-secrets set "Auth0:Management:ClientId"     "<MCP Management — Client ID>"
+dotnet user-secrets set "Auth0:Management:ClientSecret" "<MCP Management — Client Secret>"
+# Auth0:Mcp:CallbackUrl is set later, after starting cloudflared (see MCP section below)
+```
+
+```bash
+# OrderDemo.Web — create OrderDemo/OrderDemo.Web/.env.local
+VITE_AUTH0_DOMAIN=<tenant>.us.auth0.com
+VITE_AUTH0_CLIENT_ID=<Order Demo SPA — Client ID>
+VITE_AUTH0_AUDIENCE=https://api.orderdemo.dev
+```
+
+> Each time cloudflared restarts, the tunnel URL changes — update both the Allowed Callback URL on the `Order Demo MCP` Auth0 app and the `Auth0:Mcp:CallbackUrl` user secret.
 
 ## Quick start
 
@@ -43,7 +85,8 @@ aspire start
 |----------|--------------------------------|------------------------------------------|
 | `api`    | http://localhost:5000          | REST API; `/scalar` for the API explorer |
 | `mcp`    | http://localhost:5010          | MCP server (Streamable HTTP)             |
-| `web`    | http://localhost:&lt;random&gt;          | Vue 3 dashboard — exact port shown in the Aspire dashboard; proxies `/api/*` to the API |
+npm run dev
+| `web`    | http://localhost:          | Vue 3 dashboard — exact port shown in the Aspire dashboard; proxies `/api/*` to the API |
 
 `aspire stop` shuts everything down. `aspire describe` / `aspire logs <resource>` are useful while it's running.
 
@@ -84,13 +127,8 @@ brew install cloudflared
 
 **Direct download:** https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/
 
-### 2. Start the servers
 
-```bash
-cd OrderDemo/OrderDemo.AppHost && aspire start
-```
-
-### 3. Start the tunnel
+### 2. Start the tunnel
 
 In a separate terminal:
 
@@ -102,6 +140,19 @@ cloudflared will print a public HTTPS URL, e.g.:
 ```
 https://some-random-words.trycloudflare.com
 ```
+
+Ensure this is add as a user secret for `OrderDemo.MCP`
+
+```bash
+dotnet user-secrets set "Auth0:Mcp:CallbackUrl"    "https://some-random-words.trycloudflare.com"
+```
+
+### 3. Start the servers
+
+```bash
+cd OrderDemo/OrderDemo.AppHost && aspire start
+```
+
 
 ### 4. Add the Custom Connector in Claude.ai
 

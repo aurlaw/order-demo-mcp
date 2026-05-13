@@ -86,7 +86,7 @@ aspire start
 | `api`    | http://localhost:5000          | REST API; `/scalar` for the API explorer |
 | `mcp`    | http://localhost:5010          | MCP server (Streamable HTTP)             |
 npm run dev
-| `web`    | http://localhost:          | Vue 3 dashboard — exact port shown in the Aspire dashboard; proxies `/api/*` to the API |
+| `web`    | http://localhost:5176          | Vue 3 dashboard — proxies `/api/*` to the API |
 
 `aspire stop` shuts everything down. `aspire describe` / `aspire logs <resource>` are useful while it's running.
 
@@ -130,6 +130,10 @@ brew install cloudflared
 
 ### 2. Start the tunnel
 
+Pick one of the two options below. The quick tunnel is zero-config but rotates the URL every restart; the named tunnel needs a (free) Cloudflare account but gives you a stable custom-domain URL.
+
+#### Option A — Quick tunnel (no account, URL rotates each restart)
+
 In a separate terminal:
 
 ```bash
@@ -144,8 +148,58 @@ https://some-random-words.trycloudflare.com
 Ensure this is add as a user secret for `OrderDemo.MCP`
 
 ```bash
-dotnet user-secrets set "Auth0:Mcp:CallbackUrl"    "https://some-random-words.trycloudflare.com"
+dotnet user-secrets set "Auth0:Mcp:CallbackUrl"    "https://some-random-words.trycloudflare.com/callback"
 ```
+
+#### Option B — Named tunnel with a custom domain (stable URL)
+
+Requires a Cloudflare account with a domain already added to it. The tunnel UUID and credentials persist on disk, so the same hostname keeps working across restarts.
+
+**One-time setup:**
+
+```bash
+# 1. Authenticate cloudflared with your Cloudflare account — pick the domain to use
+cloudflared tunnel login
+
+# 2. Create the tunnel — note the UUID printed in the output
+cloudflared tunnel create order-demo-mcp
+```
+
+Create `~/.cloudflared/config.yml` (replace `<UUID>` and `mcp.yourdomain.com`):
+
+```yaml
+tunnel: order-demo-mcp
+credentials-file: /Users/<you>/.cloudflared/<UUID>.json
+
+ingress:
+  - hostname: mcp.yourdomain.com
+    service: http://localhost:5010
+  - service: http_status:404
+```
+
+> The catch-all `http_status:404` rule at the end is required — cloudflared rejects configs without a default service.
+
+Point a DNS record at the tunnel (creates a CNAME → `<UUID>.cfargotunnel.com` in your Cloudflare DNS):
+
+```bash
+cloudflared tunnel route dns order-demo-mcp mcp.yourdomain.com
+```
+
+Set the callback URL as a user secret for `OrderDemo.Mcp`:
+
+```bash
+dotnet user-secrets set "Auth0:Mcp:CallbackUrl"    "https://mcp.yourdomain.com/callback"
+```
+
+Add `https://mcp.yourdomain.com/callback` to the **Allowed Callback URLs** on the `Order Demo MCP` Auth0 application.
+
+**Each session — start the named tunnel:**
+
+```bash
+cloudflared tunnel run order-demo-mcp
+```
+
+The MCP server is now reachable at `https://mcp.yourdomain.com` — same URL every time, survives restarts. No Auth0 / user-secret churn between sessions.
 
 ### 3. Start the servers
 
@@ -163,7 +217,7 @@ cd OrderDemo/OrderDemo.AppHost && aspire start
 
 The four tools (`search_orders`, `get_order_detail`, `get_order_stats`, `get_top_customers`) will be available in your Claude.ai conversations.
 
-> The tunnel URL changes each time cloudflared restarts — update the connector URL when that happens.
+> If you used **Option A** (quick tunnel), the URL changes each time cloudflared restarts — update the connector URL, the Auth0 Allowed Callback URL, and the `Auth0:Mcp:CallbackUrl` user secret when that happens. **Option B** (named tunnel) keeps the same URL across restarts.
 
 ## Sample prompt
 

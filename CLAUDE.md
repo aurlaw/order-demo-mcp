@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+
+
 ## Commands
 
 The default run path is Aspire — it boots all three services, the dashboard, and OTel telemetry from a single command:
@@ -94,3 +96,13 @@ Minimal API endpoints should not use deprecated WithOpenApi()
 - `vite.config.js` reads `services__orderdemo-api__http__0` via `loadEnv(mode, process.cwd(), '')` to pick up Aspire's injected service URL for the `/api` proxy. The env key uses bracket-notation access because of the embedded hyphen.
 - Both services call `app.MapDefaultEndpoints()` after `Build()` — that maps `/health` (all checks) and `/alive` (live-tagged checks). Do **not** also call `app.MapHealthChecks("/health", ...)`; it conflicts with the route registered by `MapDefaultEndpoints()`.
 - Serilog forwards logs to the Aspire dashboard via `Serilog.Sinks.OpenTelemetry` — the OTLP endpoint comes from `OTEL_EXPORTER_OTLP_ENDPOINT` (set by Aspire) with a `http://localhost:4317` fallback for standalone runs.
+
+## Spec Files
+Spec/brief files live in the Obsidian vault under the project's domain folder.
+If a referenced brief isn't found in the repo, check the vault at the configured
+Obsidian path before asking the user to paste content.
+
+## Implementation
+Before implementing, scan the brief for every external API call, library method,
+and framework attribute. Verify each against local package inspection or docs.
+Produce a one-paragraph audit note listing any discrepancies before writing code.

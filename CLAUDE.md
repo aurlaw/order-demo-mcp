@@ -2,8 +2,6 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-
-
 ## Commands
 
 The default run path is Aspire — it boots all three services, the dashboard, and OTel telemetry from a single command:
@@ -27,7 +25,7 @@ cd OrderDemo/OrderDemo.Web && npm run dev    # http://localhost:5173
 `dotnet build` from any project compiles cleanly. There is no test project — verify via curl, the Scalar UI, or the Aspire dashboard's Traces view.
 
 ```bash
-# Reset database (re-runs seeder with all users and seed data)
+# Reset database (re-runs seeder on next start)
 rm OrderDemo/OrderDemo.Api/orderdemo.db
 ```
 
@@ -38,7 +36,7 @@ Solution layout (`OrderDemo/OrderDemo.sln`):
 | Project | Role |
 |---------|------|
 | `OrderDemo.Core` | Shared DTOs (`OrderDto`, `CursorPagedResult<T>`, `OrderStatsDto`, `TopCustomerDto`, `CustomerSummaryDto`, …) — referenced by Api and Mcp |
-| `OrderDemo.Api` | .NET 10 Minimal API + EF Core + JWT auth + Serilog |
+| `OrderDemo.Api` | .NET 10 Minimal API + EF Core + dual JWT auth (Local + Auth0) + Serilog |
 | `OrderDemo.Mcp` | MCP server (Streamable HTTP at `/`, optional stdio with `--stdio`) — tools, prompts, resources, sampling |
 | `OrderDemo.Web` | Vue 3 + Vite dashboard; Vite proxies `/api/*` → `http://localhost:5000` |
 | `OrderDemo.AppHost` | Aspire AppHost — `AppHost.cs` wires `orderdemo-api` (pinned 5000), `orderdemo-mcp` (pinned 5010, `WithReference(api).WaitFor(api)`), `web` (`AddJavaScriptApp`, pinned 5173) |
@@ -50,44 +48,73 @@ Solution layout (`OrderDemo/OrderDemo.sln`):
 Endpoints/*.cs  →  Services/OrderService.cs  →  Data/AppDbContext.cs  →  SQLite
 ```
 
-- **`Program.cs`** — calls `builder.AddServiceDefaults()` (OTel + discovery + resilience), then wires Serilog, EF Core, ASP.NET Identity, JWT Bearer auth, CORS (allows `localhost:5173`), `CorrelationMiddleware`, `UseSerilogRequestLogging`, health checks, and `MapAuthEndpoints` / `MapOrderEndpoints`.
-- **`Endpoints/`** — Minimal API route registration only; no business logic. `AuthEndpoints.cs` (login + JWT) and `OrderEndpoints.cs` (orders + `/customers/{id:int}/summary`).
+- **`Program.cs`** — calls `builder.AddServiceDefaults()` (OTel + discovery + resilience), then wires Serilog, EF Core, ASP.NET Identity, dual JWT Bearer auth (`Local` + `Auth0`), CORS (allows `localhost:5173`), `CorrelationMiddleware`, `UseSerilogRequestLogging`, health checks, and `MapAuthEndpoints` / `MapOrderEndpoints`.
+- **`Endpoints/`** — Minimal API route registration only; no business logic. All endpoints are registered under a `/api` route group. `AuthEndpoints.cs` (`POST /api/auth/login` — public backdoor) and `OrderEndpoints.cs` (all order + customer endpoints — require authorization via group policy).
 - **`Services/OrderService.cs`** — all query logic lives here. Receives `AppDbContext` and `ILogger<OrderService>` via primary-constructor injection. Every new query method goes in this class.
 - **`Models/`** — EF Core entities: `Customer`, `Order`, `OrderLine`, `Product`.
-- **`Data/Seeder.cs`** — seeds 1 000 customers, 20 products, 10 000 orders, and two auth users (`admin` / `mcp`) on first run. Guard `if (context.Customers.Any()) return;` skips on subsequent starts. **Delete `orderdemo.db` to reseed.**
+- **`Data/Seeder.cs`** — seeds 1,000 customers, 20 products, 10,000 orders, and the `admin` backdoor user on first run. Guard `if (context.Customers.Any()) return;` skips on subsequent starts. **Delete `orderdemo.db` to reseed.**
 - **DTOs live in `OrderDemo.Core/DTOs/OrderDtos.cs`** (not in the Api project) — shared with Mcp.
 - **`Middleware/CorrelationMiddleware.cs`** — reads inbound `X-Correlation-Id`, falls back to `TraceIdentifier`, echoes it on the response, pushes it into Serilog's `LogContext` so every log entry for the request carries `CorrelationId`.
 - **`HealthChecks/DatabaseHealthCheck.cs`** — `/health` returns `Healthy` only when customer + order counts are non-zero; `Degraded` when reachable-but-unseeded; `Unhealthy` on exceptions.
 
 ### MCP layer (`OrderDemo.Mcp`)
 
-- **`Services/ApiClient.cs`** — typed HTTP client; calls `EnsureTokenAsync()` + `AttachCorrelationHeader()` before each API call. Base address is `http://orderdemo-api` resolved via Aspire service discovery — only runs under Aspire (or with the env var set manually).
+- **`Services/ApiClient.cs`** — typed HTTP client; calls `SetAuthHeaderAsync()` + `AttachCorrelationHeader()` before each API call. `SetAuthHeaderAsync()` reads the Auth0 access token from the incoming request context via `IHttpContextAccessor` and forwards it to the API — there is no stored service account credential. Base address is `http://orderdemo-api` resolved via Aspire service discovery.
 - **`Tools/OrderTools.cs`** — five MCP tools returning `IEnumerable<ContentBlock>` (`search_orders`, `get_order_detail`, `get_order_stats`, `get_top_customers`, `generate_insights` — last one uses sampling).
-- **`Prompts/OrderPrompts.cs`** — four prompt templates (`monthly_order_summary`, `top_customers_report`, `order_lookup`, `daily_briefing`).
+- **`Prompts/OrderPrompts.cs`** — four prompt templates (`monthly_order_summary`, `top_customers_report`, `order_lookup`, `daily_briefing`). Prompt text does not reference the connector name — connector-agnostic by design.
 - **`Resources/OrderResources.cs`** — two static (`orders://products/catalogue`, `orders://schema`) + one templated (`orders://customers/{id}/summary`).
 - **`HealthChecks/ApiHealthCheck.cs`** — uses a dedicated unauthenticated `HttpClient` named `"health"`. Maps 2xx → `Healthy`; non-2xx / `HttpRequestException` / `TaskCanceledException` → `Degraded`. Mcp reports `Degraded` (not `Unhealthy`) when the API is down — the process is still running.
 - **stdio guard in `Program.cs`** — when launched with `--stdio`, Serilog writes plain text to stderr only (stdout is reserved for the MCP protocol stream); HTTP mode uses the JSON formatter.
 
 ### Auth and secrets
 
-All order endpoints require `[RequireAuthorization]`. Obtain a JWT via `POST /auth/login` with `{"username":"admin","password":"Admin@demo1!"}` (or `mcp` / `Mcp@service1!`). Token lifetime is 8 hours.
+**Two authentication schemes run in parallel on the API:**
 
-`Jwt:Secret`, `AdminUser:Password`, `McpUser:Password` (Api) and `ApiClient:Password` (Mcp) live in [.NET User Secrets](https://learn.microsoft.com/en-us/aspnet/core/security/app-secrets) and only load when `ASPNETCORE_ENVIRONMENT=Development`. The AppHost sets that env var explicitly on both projects — without it Aspire would default to `Production` and login would 401 because Mcp would send placeholder strings as the password. See the README for the per-project `dotnet user-secrets set` commands.
+| Scheme | Purpose | How to use |
+|--------|---------|------------|
+| `Local` | Scalar/API testing backdoor | `POST /api/auth/login` → returns local JWT |
+| `Auth0` | All real users (Vue + MCP) | Auth0 Universal Login; token validated against Auth0 JWKS |
+
+The `ApiAccess` authorization policy accepts either scheme. All order endpoints require this policy via the `/api` route group.
+
+The MCP server is an Auth0 resource server — it validates the incoming Auth0 token on each request and forwards it to the API. There is no service account or stored credential in the MCP server.
+
+**User Secrets required per project:**
+
+`OrderDemo.Api`:
+- `Jwt:Secret` — signing key for local backdoor tokens (min 32 chars)
+- `AdminUser:Password` — password for the seeded `admin` backdoor user
+- `Auth0:Domain` — Auth0 tenant domain
+- `Auth0:Audience` — Auth0 API identifier
+
+`OrderDemo.Mcp`:
+- `Auth0:Domain`
+- `Auth0:Audience`
+- `Auth0:Mcp:ClientId` — Order Demo MCP application Client ID
+- `Auth0:Mcp:ClientSecret` — Order Demo MCP application Client Secret
+- `Auth0:Management:ClientId` — Order Demo MCP Management Client ID
+- `Auth0:Management:ClientSecret` — Order Demo MCP Management Client Secret
+
+`OrderDemo.Web` (`.env.local`, not User Secrets):
+- `VITE_AUTH0_DOMAIN`
+- `VITE_AUTH0_CLIENT_ID`
+- `VITE_AUTH0_AUDIENCE`
+
+User Secrets only load when `ASPNETCORE_ENVIRONMENT=Development`. The AppHost sets that env var explicitly on both .NET projects.
 
 ### Route registration order matters
 
-In `OrderEndpoints.cs`, literal routes (`/orders/stats`, `/orders/top-customers`) are registered **before** the parameterised route (`/orders/{orderNumber}`) to prevent ASP.NET Core from matching literal segments as order number values.
+In `OrderEndpoints.cs`, literal routes (`/orders/stats`, `/orders/top-customers`, `/orders/cursor`) are registered **before** the parameterised route (`/orders/{orderNumber}`) to prevent ASP.NET Core from matching literal segments as order number values. All routes are under the `/api` group — full paths are `/api/orders/stats`, `/api/orders/{orderNumber}`, etc.
 
-Minimal API endpoints should not use deprecated WithOpenApi()
+Minimal API endpoints should not use the deprecated `WithOpenApi()`.
 
 ### EF Core / SQLite note
 
 `GroupBy` with aggregates (`Sum`, `Count`) on SQLite requires breaking into two queries — one to aggregate by ID, a second to hydrate the entity details — to avoid EF Core translation failures. See `GetTopCustomersAsync` in `OrderService.cs` for the established pattern.
 
-
 ### MCP transport endpoint
 
-`MapMcp()` registers the Streamable HTTP transport at the **root path** (`/`), not `/mcp`. Initialize with `POST /` and use the returned `Mcp-Session-Id` header on subsequent calls. The `/mcp` path returns 404.
+`MapMcp()` registers the Streamable HTTP transport at the **root path** (`/`), not `/mcp`. A `/mcp` prefix was attempted and reverted — it breaks Claude Desktop's OAuth connector flow. Initialize with `POST /` and use the returned `Mcp-Session-Id` header on subsequent calls.
 
 ### Aspire constraints
 
@@ -96,13 +123,16 @@ Minimal API endpoints should not use deprecated WithOpenApi()
 - `vite.config.js` reads `services__orderdemo-api__http__0` via `loadEnv(mode, process.cwd(), '')` to pick up Aspire's injected service URL for the `/api` proxy. The env key uses bracket-notation access because of the embedded hyphen.
 - Both services call `app.MapDefaultEndpoints()` after `Build()` — that maps `/health` (all checks) and `/alive` (live-tagged checks). Do **not** also call `app.MapHealthChecks("/health", ...)`; it conflicts with the route registered by `MapDefaultEndpoints()`.
 - Serilog forwards logs to the Aspire dashboard via `Serilog.Sinks.OpenTelemetry` — the OTLP endpoint comes from `OTEL_EXPORTER_OTLP_ENDPOINT` (set by Aspire) with a `http://localhost:4317` fallback for standalone runs.
+- `ApiClient` is registered as **scoped** (not singleton) — it reads the Auth0 token from `IHttpContextAccessor` per request. A singleton would fail at runtime trying to access a scoped service.
 
 ## Spec Files
+
 Spec/brief files live in the Obsidian vault under the project's domain folder.
 If a referenced brief isn't found in the repo, check the vault at the configured
 Obsidian path before asking the user to paste content.
 
 ## Implementation
+
 Before implementing, scan the brief for every external API call, library method,
 and framework attribute. Verify each against local package inspection or docs.
 Produce a one-paragraph audit note listing any discrepancies before writing code.

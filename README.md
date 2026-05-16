@@ -21,36 +21,6 @@ Sensitive config — the JWT signing key and seeded user passwords — lives in 
 cd OrderDemo/OrderDemo.Api
 dotnet user-secrets set "Jwt:Secret"          "order-demo-secret-key-min-32-chars-long!"
 dotnet user-secrets set "AdminUser:Password"  "Admin@demo1!"
-dotnet user-secrets set "McpUser:Password"    "Mcp@service1!"
-
-# OrderDemo.Mcp
-cd ../OrderDemo.Mcp
-dotnet user-secrets set "ApiClient:Password"  "Mcp@service1!"
-```
-
-### 3. Configure Auth0
-
-Auth0 brokers user login for the Vue dashboard and OAuth for the MCP server (Claude.ai Custom Connector). Set this up once in the [Auth0 dashboard](https://manage.auth0.com), then mirror the values into User Secrets and `.env.local`.
-
-**In the Auth0 dashboard, create:**
-
-| Resource | Type | Key settings |
-|----------|------|--------------|
-| `Order Demo API` | API | Identifier `https://api.orderdemo.dev`, RS256, permission `orders:read` |
-| `Order Demo SPA` | Single Page Application | Allowed Callback / Logout / Web Origins: `http://localhost:5173` |
-| `Order Demo MCP` | Regular Web Application | Allowed Callback URL: `https://<your-tunnel>.trycloudflare.com/callback` (update on each new tunnel) |
-| `Order Demo MCP Management` | Machine to Machine | Authorise against the **Auth0 Management API** with `create:clients`, `delete:clients`, `read:clients` |
-| Test user | Database connection | `Username-Password-Authentication` — used to log into the dashboard and Claude.ai connector |
-
-On the API, enable **Allow Skipping User Consent** for development, and ensure the SPA is authorised with the `orders:read` scope.
-
-**Then set the values:**
-
-```bash
-# OrderDemo.Api
-cd OrderDemo/OrderDemo.Api
-dotnet user-secrets set "Auth0:Domain"                  "<tenant>.us.auth0.com"
-dotnet user-secrets set "Auth0:Audience"                "https://api.orderdemo.dev"
 
 # OrderDemo.Mcp
 cd ../OrderDemo.Mcp
@@ -60,7 +30,31 @@ dotnet user-secrets set "Auth0:Mcp:ClientId"            "<Order Demo MCP — Cli
 dotnet user-secrets set "Auth0:Mcp:ClientSecret"        "<Order Demo MCP — Client Secret>"
 dotnet user-secrets set "Auth0:Management:ClientId"     "<MCP Management — Client ID>"
 dotnet user-secrets set "Auth0:Management:ClientSecret" "<MCP Management — Client Secret>"
-# Auth0:Mcp:CallbackUrl is set later, after starting cloudflared (see MCP section below)
+```
+
+### 3. Configure Auth0
+
+Auth0 brokers user login for the Vue dashboard and the MCP server (Claude.ai Custom Connector). Set this up once in the [Auth0 dashboard](https://manage.auth0.com), then mirror the values into User Secrets and `.env.local`.
+
+**In the Auth0 dashboard, create:**
+
+| Resource | Type | Key settings |
+|----------|------|--------------|
+| `Order Demo API` | API | Identifier `https://api.orderdemo.dev`, RS256, permission `orders:read` |
+| `Order Demo SPA` | Single Page Application | Allowed Callback / Logout / Web Origins: `http://localhost:5173` |
+| `Order Demo MCP` | Regular Web Application | Allowed Callback URL: `https://claude.ai/api/mcp/auth_callback` |
+| `Order Demo MCP Management` | Machine to Machine | Authorise against **Auth0 Management API** with `create:clients`, `delete:clients`, `read:clients` |
+| Test user | Database connection | `Username-Password-Authentication` — used to log in via the dashboard and Claude.ai connector |
+
+On the API, enable **Allow Skipping User Consent** for development, and ensure the SPA and MCP applications are authorised with the `orders:read` scope under **Application Access**.
+
+**Then set the remaining values:**
+
+```bash
+# OrderDemo.Api
+cd OrderDemo/OrderDemo.Api
+dotnet user-secrets set "Auth0:Domain"    "<tenant>.us.auth0.com"
+dotnet user-secrets set "Auth0:Audience" "https://api.orderdemo.dev"
 ```
 
 ```bash
@@ -69,8 +63,6 @@ VITE_AUTH0_DOMAIN=<tenant>.us.auth0.com
 VITE_AUTH0_CLIENT_ID=<Order Demo SPA — Client ID>
 VITE_AUTH0_AUDIENCE=https://api.orderdemo.dev
 ```
-
-> Each time cloudflared restarts, the tunnel URL changes — update both the Allowed Callback URL on the `Order Demo MCP` Auth0 app and the `Auth0:Mcp:CallbackUrl` user secret.
 
 ## Quick start
 
@@ -81,12 +73,11 @@ aspire start
 
 `aspire start` boots all three services and the Aspire dashboard. The CLI prints a dashboard URL (with login token) — open it to see resources, logs, traces, and metrics.
 
-| Resource | URL                            | Notes                                    |
-|----------|--------------------------------|------------------------------------------|
-| `api`    | http://localhost:5000          | REST API; `/scalar` for the API explorer |
-| `mcp`    | http://localhost:5010          | MCP server (Streamable HTTP)             |
-npm run dev
-| `web`    | http://localhost:5176          | Vue 3 dashboard — proxies `/api/*` to the API |
+| Resource | URL | Notes |
+|----------|-----|-------|
+| `api` | http://localhost:5000 | REST API; `/scalar` for the API explorer |
+| `mcp` | http://localhost:5010 | MCP server (Streamable HTTP) |
+| `web` | http://localhost:5176 | Vue 3 dashboard — proxies `/api/*` to the API |
 
 `aspire stop` shuts everything down. `aspire describe` / `aspire logs <resource>` are useful while it's running.
 
@@ -112,7 +103,7 @@ npm run dev
 # → http://localhost:5173
 ```
 
-`OrderDemo/run.sh` starts the Api and Mcp together in this mode (no dashboard, no telemetry).
+`OrderDemo/run.sh` starts the API and MCP together in this mode (no dashboard, no telemetry).
 
 ## MCP (Claude.ai — Custom Connector)
 
@@ -126,7 +117,6 @@ brew install cloudflared
 ```
 
 **Direct download:** https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/
-
 
 ### 2. Start the tunnel
 
@@ -145,11 +135,7 @@ cloudflared will print a public HTTPS URL, e.g.:
 https://some-random-words.trycloudflare.com
 ```
 
-Ensure this is add as a user secret for `OrderDemo.MCP`
-
-```bash
-dotnet user-secrets set "Auth0:Mcp:CallbackUrl"    "https://some-random-words.trycloudflare.com/callback"
-```
+Update the Custom Connector URL in Claude.ai Settings each time the tunnel URL changes.
 
 #### Option B — Named tunnel with a custom domain (stable URL)
 
@@ -158,7 +144,7 @@ Requires a Cloudflare account with a domain already added to it. The tunnel UUID
 **One-time setup:**
 
 ```bash
-# 1. Authenticate cloudflared with your Cloudflare account — pick the domain to use
+# 1. Authenticate cloudflared with your Cloudflare account
 cloudflared tunnel login
 
 # 2. Create the tunnel — note the UUID printed in the output
@@ -179,19 +165,11 @@ ingress:
 
 > The catch-all `http_status:404` rule at the end is required — cloudflared rejects configs without a default service.
 
-Point a DNS record at the tunnel (creates a CNAME → `<UUID>.cfargotunnel.com` in your Cloudflare DNS):
+Point a DNS record at the tunnel:
 
 ```bash
 cloudflared tunnel route dns order-demo-mcp mcp.yourdomain.com
 ```
-
-Set the callback URL as a user secret for `OrderDemo.Mcp`:
-
-```bash
-dotnet user-secrets set "Auth0:Mcp:CallbackUrl"    "https://mcp.yourdomain.com/callback"
-```
-
-Add `https://mcp.yourdomain.com/callback` to the **Allowed Callback URLs** on the `Order Demo MCP` Auth0 application.
 
 **Each session — start the named tunnel:**
 
@@ -199,7 +177,7 @@ Add `https://mcp.yourdomain.com/callback` to the **Allowed Callback URLs** on th
 cloudflared tunnel run order-demo-mcp
 ```
 
-The MCP server is now reachable at `https://mcp.yourdomain.com` — same URL every time, survives restarts. No Auth0 / user-secret churn between sessions.
+The MCP server is now reachable at `https://mcp.yourdomain.com` — same URL every time, no connector churn between sessions.
 
 ### 3. Start the servers
 
@@ -207,23 +185,23 @@ The MCP server is now reachable at `https://mcp.yourdomain.com` — same URL eve
 cd OrderDemo/OrderDemo.AppHost && aspire start
 ```
 
-
 ### 4. Add the Custom Connector in Claude.ai
 
 1. Go to **Claude.ai → Settings → Connectors**
 2. Click **Add custom connector**
-3. Paste the tunnel URL from step 3
-4. Save
+3. Paste the tunnel URL (Option A) or your custom domain URL (Option B)
+4. Complete the Auth0 login flow when prompted
+5. Save
 
-The four tools (`search_orders`, `get_order_detail`, `get_order_stats`, `get_top_customers`) will be available in your Claude.ai conversations.
+The tools (`search_orders`, `get_order_detail`, `get_order_stats`, `get_top_customers`) will be available in your Claude.ai conversations.
 
-> If you used **Option A** (quick tunnel), the URL changes each time cloudflared restarts — update the connector URL, the Auth0 Allowed Callback URL, and the `Auth0:Mcp:CallbackUrl` user secret when that happens. **Option B** (named tunnel) keeps the same URL across restarts.
+> If you used **Option A** (quick tunnel), the connector URL changes each time cloudflared restarts — update it in Claude.ai Settings. **Option B** (named tunnel) keeps the same URL across restarts.
 
 ## Sample prompt
 
 Once the connector is active, try this in a Claude.ai conversation:
 
-> You have access to the order-demo connector. Using it, please do the following:
+> Please do the following:
 >
 > 1. Get overall order stats for the last 30 days — total orders, total revenue, and average order value.
 > 2. Find the top 5 customers by spend over the same period. For the #1 customer, look up their most recent order by searching for their last name and show the full order detail.
@@ -233,12 +211,14 @@ Once the connector is active, try this in a Claude.ai conversation:
 
 ## Auth
 
-| User    | Password         | Use              |
-|---------|------------------|------------------|
-| `admin` | `Admin@demo1!`   | API / Scalar UI  |
-| `mcp`   | `Mcp@service1!`  | MCP server (auto)|
+Authentication uses Auth0 for all user-facing surfaces (Vue dashboard and MCP connector). A local JWT backdoor is available for API testing via Scalar only.
 
-JWT tokens are valid for 8 hours. The MCP server authenticates automatically on startup.
+| User | Password | Use |
+|------|----------|-----|
+| `admin` | `Admin@demo1!` | Scalar UI / API testing only |
+| Auth0 test user | set in Auth0 dashboard | Vue dashboard + Claude.ai connector |
+
+JWT backdoor tokens are valid for 8 hours. All other authentication is handled by Auth0.
 
 These passwords are loaded from User Secrets — see [First-time setup](#first-time-setup).
 
@@ -254,4 +234,4 @@ npx @modelcontextprotocol/inspector@latest
 rm OrderDemo/OrderDemo.Api/orderdemo.db
 ```
 
-Re-runs the seeder on next start: 1 000 customers, 20 products, 10 000 orders, both users.
+Re-runs the seeder on next start: 1,000 customers, 20 products, 10,000 orders, admin user.

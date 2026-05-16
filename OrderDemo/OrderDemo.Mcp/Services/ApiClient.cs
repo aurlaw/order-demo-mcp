@@ -29,7 +29,7 @@ public class ApiClient(
     {
         logger.LogInformation("Refreshing API authentication token");
 
-        var response = await httpClient.PostAsJsonAsync("/auth/login", new
+        var response = await httpClient.PostAsJsonAsync("/api/auth/login", new
         {
             username = config["ApiClient:Username"],
             password = config["ApiClient:Password"]
@@ -79,7 +79,7 @@ public class ApiClient(
             ("to",       to));
 
         var result = await httpClient.GetFromJsonAsync<CursorPagedResult<OrderDto>>(
-            $"/orders/cursor{qs}")
+            $"/api/orders/cursor{qs}")
             ?? throw new InvalidOperationException("Empty response from cursor endpoint.");
 
         logger.LogDebug(
@@ -97,7 +97,7 @@ public class ApiClient(
         AttachCorrelationHeader();
 
         var response = await httpClient.GetAsync(
-            $"/orders/{Uri.EscapeDataString(orderNumber)}");
+            $"/api/orders/{Uri.EscapeDataString(orderNumber)}");
 
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
@@ -129,7 +129,7 @@ public class ApiClient(
         await EnsureTokenAsync();
         AttachCorrelationHeader();
 
-        var response = await httpClient.GetAsync($"/customers/{customerId}/summary");
+        var response = await httpClient.GetAsync($"/api/customers/{customerId}/summary");
 
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
@@ -162,7 +162,7 @@ public class ApiClient(
         AttachCorrelationHeader();
 
         var qs = BuildQueryString(("from", from), ("to", to));
-        var stats = await httpClient.GetFromJsonAsync<OrderStatsDto>($"/orders/stats{qs}")
+        var stats = await httpClient.GetFromJsonAsync<OrderStatsDto>($"/api/orders/stats{qs}")
             ?? throw new InvalidOperationException("Empty response from stats endpoint.");
 
         logger.LogDebug(
@@ -188,7 +188,7 @@ public class ApiClient(
             ("limit", limit.ToString()));
 
         var customers = await httpClient.GetFromJsonAsync<IEnumerable<TopCustomerDto>>(
-            $"/orders/top-customers{qs}")
+            $"/api/orders/top-customers{qs}")
             ?? [];
 
         var list = customers.ToList();

@@ -11,7 +11,9 @@ public static class AuthEndpoints
 {
     public static void MapAuthEndpoints(this WebApplication app)
     {
-        app.MapPost("/auth/login", async (
+        var group = app.MapGroup("/api");
+
+        group.MapPost("/auth/login", async (
             LoginRequest request,
             UserManager<IdentityUser> userManager,
             IConfiguration config) =>

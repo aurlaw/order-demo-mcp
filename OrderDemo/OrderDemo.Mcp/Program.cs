@@ -81,7 +81,7 @@ try
 
     if (!useStdio)
     {
-        app.MapMcp();
+        app.MapMcp("/mcp");
         app.MapDefaultEndpoints();
     }
 

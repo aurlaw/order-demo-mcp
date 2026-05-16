@@ -6,7 +6,10 @@ public static class OrderEndpoints
 {
     public static void MapOrderEndpoints(this WebApplication app)
     {
-        app.MapGet("/orders/stats", async (
+        var group = app.MapGroup("/api")
+            .RequireAuthorization();
+
+        group.MapGet("/orders/stats", async (
             OrderService orderService,
             DateTime? from = null,
             DateTime? to   = null) =>
@@ -16,10 +19,9 @@ public static class OrderEndpoints
         })
         .WithName("GetOrderStats")
         .WithSummary("Get aggregate order statistics")
-        .WithDescription("Returns total order count, total value, and average order value. Optionally scoped to a date range.")
-        .RequireAuthorization();
+        .WithDescription("Returns total order count, total value, and average order value. Optionally scoped to a date range.");
 
-        app.MapGet("/orders/top-customers", async (
+        group.MapGet("/orders/top-customers", async (
             OrderService orderService,
             DateTime? from  = null,
             DateTime? to    = null,
@@ -30,10 +32,9 @@ public static class OrderEndpoints
         })
         .WithName("GetTopCustomers")
         .WithSummary("Get top customers by total spend")
-        .WithDescription("Returns customers ranked by total spend within an optional date range.")
-        .RequireAuthorization();
+        .WithDescription("Returns customers ranked by total spend within an optional date range.");
 
-        app.MapGet("/orders/cursor", async (
+        group.MapGet("/orders/cursor", async (
             OrderService orderService,
             string?   cursor   = null,
             int       pageSize = 20,
@@ -48,10 +49,9 @@ public static class OrderEndpoints
         .WithName("GetOrdersCursor")
         .WithSummary("Get orders using cursor-based pagination")
         .WithDescription("Keyset pagination. Pass nextCursor from the previous response for the next page. " +
-                         "Null nextCursor indicates no more results.")
-        .RequireAuthorization();
+                         "Null nextCursor indicates no more results.");
 
-        app.MapGet("/orders/{orderNumber}", async (
+        group.MapGet("/orders/{orderNumber}", async (
             string       orderNumber,
             OrderService orderService) =>
         {
@@ -60,10 +60,9 @@ public static class OrderEndpoints
         })
         .WithName("GetOrderByNumber")
         .WithSummary("Get a single order by order number")
-        .WithDescription("Returns full order detail including customer and all line items.")
-        .RequireAuthorization();
+        .WithDescription("Returns full order detail including customer and all line items.");
 
-        app.MapGet("/orders", async (
+        group.MapGet("/orders", async (
             OrderService orders,
             int page = 1,
             int pageSize = 20,
@@ -76,10 +75,9 @@ public static class OrderEndpoints
         })
         .WithName("GetOrders")
         .WithSummary("Get paginated orders")
-        .WithDescription("Returns paginated orders. Filter by customer last name and/or date range.")
-        .RequireAuthorization();
+        .WithDescription("Returns paginated orders. Filter by customer last name and/or date range.");
 
-        app.MapGet("/customers/{customerId:int}/summary", async (
+        group.MapGet("/customers/{customerId:int}/summary", async (
             int          customerId,
             OrderService orderService) =>
         {
@@ -88,7 +86,6 @@ public static class OrderEndpoints
         })
         .WithName("GetCustomerSummary")
         .WithSummary("Get order summary for a customer")
-        .WithDescription("Returns aggregate order data for a specific customer.")
-        .RequireAuthorization();
+        .WithDescription("Returns aggregate order data for a specific customer.");
     }
 }

@@ -1,9 +1,11 @@
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, onMounted, watch } from 'vue'
+import { createAuth0Client } from '@auth0/auth0-spa-js'
 
-const token           = ref(localStorage.getItem('token') || null)
-const isAuthenticated = computed(() => !!token.value)
-const loginForm       = reactive({ username: '', password: '', loading: false, error: null })
+let auth0Client = null
+
+const isAuthenticated = ref(false)
+const isLoading       = ref(true)
 
 const orders = ref([])
 const loading = ref(false)
@@ -27,10 +29,43 @@ function toggleDark() {
   darkMode.value = !darkMode.value
 }
 
+async function initAuth() {
+  auth0Client = await createAuth0Client({
+    domain:   import.meta.env.VITE_AUTH0_DOMAIN,
+    clientId: import.meta.env.VITE_AUTH0_CLIENT_ID,
+    authorizationParams: {
+      redirect_uri: window.location.origin,
+      audience:     import.meta.env.VITE_AUTH0_AUDIENCE,
+      scope:        'openid profile email orders:read'
+    }
+  })
+
+  if (window.location.search.includes('code=')) {
+    await auth0Client.handleRedirectCallback()
+    window.history.replaceState({}, document.title, window.location.pathname)
+  }
+
+  isAuthenticated.value = await auth0Client.isAuthenticated()
+  isLoading.value       = false
+
+  if (isAuthenticated.value) fetchOrders()
+}
+
+async function login() {
+  await auth0Client.loginWithRedirect()
+}
+
+async function logout() {
+  await auth0Client.logout({
+    logoutParams: { returnTo: window.location.origin }
+  })
+}
+
 async function fetchOrders() {
   loading.value = true
-  error.value = null
+  error.value   = null
   try {
+    const token  = await auth0Client.getTokenSilently()
     const params = new URLSearchParams()
     params.set('page', pagination.page)
     params.set('pageSize', pagination.pageSize)
@@ -39,13 +74,13 @@ async function fetchOrders() {
     if (applied.to) params.set('to', applied.to)
 
     const res = await fetch(`/api/orders?${params}`, {
-      headers: { Authorization: `Bearer ${token.value}` }
+      headers: { Authorization: `Bearer ${token}` }
     })
-    if (res.status === 401) { logout(); return }
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    if (res.status === 401) { await login(); return }
+    if (!res.ok) throw new Error(`Request failed: ${res.status}`)
     const data = await res.json()
 
-    orders.value = data.items
+    orders.value          = data.items
     pagination.totalCount = data.totalCount
     pagination.totalPages = data.totalPages
   } catch (e) {
@@ -53,33 +88,6 @@ async function fetchOrders() {
   } finally {
     loading.value = false
   }
-}
-
-async function login() {
-  loginForm.loading = true
-  loginForm.error   = null
-  try {
-    const res = await fetch('/api/auth/login', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ username: loginForm.username, password: loginForm.password })
-    })
-    if (!res.ok) throw new Error('Invalid username or password')
-    const data   = await res.json()
-    token.value  = data.token
-    localStorage.setItem('token', data.token)
-    fetchOrders()
-  } catch (e) {
-    loginForm.error = e.message
-  } finally {
-    loginForm.loading = false
-  }
-}
-
-function logout() {
-  token.value = null
-  localStorage.removeItem('token')
-  orders.value = []
 }
 
 function applyFilters() {
@@ -134,111 +142,134 @@ function pageWindow() {
   return pages
 }
 
-onMounted(() => { if (isAuthenticated.value) fetchOrders() })
+onMounted(initAuth)
 </script>
 
 <template>
-  <div v-if="!isAuthenticated" class="login-wrapper">
-    <div class="login-card">
-      <h1>Order Demo</h1>
-      <p class="login-subtitle">Sign in to continue</p>
-      <form @submit.prevent="login">
-        <div class="field">
-          <label>Username</label>
-          <input v-model="loginForm.username" type="text" autocomplete="username" required />
-        </div>
-        <div class="field">
-          <label>Password</label>
-          <input v-model="loginForm.password" type="password" autocomplete="current-password" required />
-        </div>
-        <p v-if="loginForm.error" class="login-error">{{ loginForm.error }}</p>
-        <button type="submit" class="btn-primary full-width" :disabled="loginForm.loading">
-          {{ loginForm.loading ? 'Signing in…' : 'Sign In' }}
-        </button>
-      </form>
+  <div class="layout">
+    <div v-if="isLoading" class="state-overlay">
+      <div class="spinner" />
+      <span>Loading…</span>
     </div>
+
+    <div v-else-if="!isAuthenticated" class="login-wrapper">
+      <div class="login-card">
+        <h1>Order Demo</h1>
+        <p class="login-subtitle">Sign in to continue</p>
+        <button class="btn-primary full-width" @click="login">
+          Sign In
+        </button>
+      </div>
+    </div>
+
+    <template v-else>
+      <header>
+        <div class="header-inner">
+          <h1>Order Dashboard</h1>
+          <div class="header-right">
+            <span v-if="!loading" class="badge">{{ pagination.totalCount.toLocaleString() }} orders</span>
+            <button class="btn-ghost theme-toggle" @click="toggleDark" :title="darkMode ? 'Switch to light mode' : 'Switch to dark mode'">
+              <svg v-if="darkMode" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="5"/>
+                <line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+                <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+              </svg>
+              <svg v-else width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+              </svg>
+            </button>
+            <button class="btn-ghost" @click="logout">Sign Out</button>
+          </div>
+        </div>
+      </header>
+
+      <main>
+        <div class="card filter-bar">
+          <input v-model="filters.lastName" type="text" placeholder="Last name…" />
+          <input v-model="filters.from" type="date" />
+          <input v-model="filters.to" type="date" />
+          <button class="btn-primary" @click="applyFilters">Apply</button>
+          <button class="btn-secondary" @click="clearFilters">Clear</button>
+        </div>
+
+        <div class="card">
+          <div v-if="loading" class="state-msg">Loading…</div>
+          <div v-else-if="error" class="state-msg error">Error: {{ error }}</div>
+          <div v-else>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Order #</th>
+                    <th>Date</th>
+                    <th>Customer</th>
+                    <th>Email</th>
+                    <th>Items</th>
+                    <th class="right">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-if="orders.length === 0">
+                    <td colspan="6" class="empty">No orders found.</td>
+                  </tr>
+                  <tr v-for="order in orders" :key="order.id">
+                    <td class="mono">{{ order.orderNumber }}</td>
+                    <td>{{ formatDate(order.orderDate) }}</td>
+                    <td>{{ order.customer.firstName }} {{ order.customer.lastName }}</td>
+                    <td class="muted">{{ order.customer.email }}</td>
+                    <td><span class="pill">{{ order.lines.length }}</span></td>
+                    <td class="right bold tabular">{{ formatCurrency(order.total) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="pagination">
+              <button :disabled="pagination.page <= 1" @click="goToPage(pagination.page - 1)">‹</button>
+              <template v-for="p in pageWindow()" :key="p">
+                <span v-if="p === '...'" class="ellipsis">…</span>
+                <button v-else :class="{ active: p === pagination.page }" @click="goToPage(p)">{{ p }}</button>
+              </template>
+              <button :disabled="pagination.page >= pagination.totalPages" @click="goToPage(pagination.page + 1)">›</button>
+              <span class="page-label">Page {{ pagination.page }} of {{ pagination.totalPages }}</span>
+            </div>
+          </div>
+        </div>
+      </main>
+    </template>
   </div>
-
-  <template v-if="isAuthenticated">
-    <header>
-      <div class="header-inner">
-        <h1>Order Dashboard</h1>
-        <div class="header-right">
-          <span v-if="!loading" class="badge">{{ pagination.totalCount.toLocaleString() }} orders</span>
-          <button class="btn-ghost theme-toggle" @click="toggleDark" :title="darkMode ? 'Switch to light mode' : 'Switch to dark mode'">
-            <svg v-if="darkMode" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="5"/>
-              <line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
-              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
-              <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
-              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
-            </svg>
-            <svg v-else width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-            </svg>
-          </button>
-          <button class="btn-ghost" @click="logout">Sign Out</button>
-        </div>
-      </div>
-    </header>
-
-    <main>
-      <div class="card filter-bar">
-        <input v-model="filters.lastName" type="text" placeholder="Last name…" />
-        <input v-model="filters.from" type="date" />
-        <input v-model="filters.to" type="date" />
-        <button class="btn-primary" @click="applyFilters">Apply</button>
-        <button class="btn-secondary" @click="clearFilters">Clear</button>
-      </div>
-
-      <div class="card">
-        <div v-if="loading" class="state-msg">Loading…</div>
-        <div v-else-if="error" class="state-msg error">Error: {{ error }}</div>
-        <div v-else>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Order #</th>
-                  <th>Date</th>
-                  <th>Customer</th>
-                  <th>Email</th>
-                  <th>Items</th>
-                  <th class="right">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-if="orders.length === 0">
-                  <td colspan="6" class="empty">No orders found.</td>
-                </tr>
-                <tr v-for="order in orders" :key="order.id">
-                  <td class="mono">{{ order.orderNumber }}</td>
-                  <td>{{ formatDate(order.orderDate) }}</td>
-                  <td>{{ order.customer.firstName }} {{ order.customer.lastName }}</td>
-                  <td class="muted">{{ order.customer.email }}</td>
-                  <td><span class="pill">{{ order.lines.length }}</span></td>
-                  <td class="right bold tabular">{{ formatCurrency(order.total) }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          <div class="pagination">
-            <button :disabled="pagination.page <= 1" @click="goToPage(pagination.page - 1)">‹</button>
-            <template v-for="p in pageWindow()" :key="p">
-              <span v-if="p === '...'" class="ellipsis">…</span>
-              <button v-else :class="{ active: p === pagination.page }" @click="goToPage(p)">{{ p }}</button>
-            </template>
-            <button :disabled="pagination.page >= pagination.totalPages" @click="goToPage(pagination.page + 1)">›</button>
-            <span class="page-label">Page {{ pagination.page }} of {{ pagination.totalPages }}</span>
-          </div>
-        </div>
-      </div>
-    </main>
-  </template>
 </template>
 
 <style scoped>
+.layout {
+  min-height: 100vh;
+}
+
+.state-overlay {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  color: var(--text-muted);
+}
+
+.spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 header {
   padding: 24px 32px 0;
 }
@@ -518,44 +549,6 @@ tbody td {
   color: var(--text-muted);
   font-size: 14px;
   margin-bottom: 28px;
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-bottom: 16px;
-}
-
-.field label {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.field input {
-  height: 40px;
-  padding: 0 12px;
-  border: 1px solid var(--input-border);
-  border-radius: 6px;
-  font-size: 14px;
-  color: var(--text);
-  background: var(--input-bg);
-  outline: none;
-  transition: border-color 0.15s;
-}
-
-.field input:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
-}
-
-.login-error {
-  font-size: 13px;
-  color: #dc2626;
-  margin-bottom: 12px;
 }
 
 .full-width {

@@ -7,7 +7,7 @@ public static class OrderEndpoints
     public static void MapOrderEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api")
-            .RequireAuthorization();
+            .RequireAuthorization("ApiAccess");
 
         group.MapGet("/orders/stats", async (
             OrderService orderService,

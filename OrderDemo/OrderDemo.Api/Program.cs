@@ -1,5 +1,4 @@
 using System.Text;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -59,8 +58,8 @@ try
     })
     .AddEntityFrameworkStores<AppDbContext>();
 
-    builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-        .AddJwtBearer(options =>
+    builder.Services.AddAuthentication()
+        .AddJwtBearer("Local", options =>
         {
             options.TokenValidationParameters = new TokenValidationParameters
             {
@@ -73,9 +72,21 @@ try
                 IssuerSigningKey         = new SymmetricSecurityKey(
                     Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Secret"]!))
             };
+        })
+        .AddJwtBearer("Auth0", options =>
+        {
+            options.Authority = $"https://{builder.Configuration["Auth0:Domain"]}/";
+            options.Audience  = builder.Configuration["Auth0:Audience"];
         });
 
-    builder.Services.AddAuthorization();
+    builder.Services.AddAuthorization(options =>
+    {
+        options.AddPolicy("ApiAccess", policy =>
+        {
+            policy.AddAuthenticationSchemes("Local", "Auth0");
+            policy.RequireAuthenticatedUser();
+        });
+    });
 
     builder.Services.AddHealthChecks()
         .AddCheck<DatabaseHealthCheck>(

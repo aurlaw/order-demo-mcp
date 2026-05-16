@@ -1,5 +1,7 @@
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using ModelContextProtocol.AspNetCore;
+using OrderDemo.Mcp.Endpoints;
 using OrderDemo.Mcp.HealthChecks;
 using OrderDemo.Mcp.Prompts;
 using OrderDemo.Mcp.Resources;
@@ -14,15 +16,16 @@ Log.Logger = new LoggerConfiguration()
 try
 {
     var builder  = WebApplication.CreateBuilder(args);
+    var config   = builder.Configuration;
     var useStdio = args.Contains("--stdio");
 
     builder.Configuration["UseStdio"] = useStdio.ToString();
 
     builder.AddServiceDefaults();
 
-    builder.Host.UseSerilog((context, services, config) =>
+    builder.Host.UseSerilog((context, services, logConfig) =>
     {
-        var logConfig = config
+        var cfg = logConfig
             .ReadFrom.Configuration(context.Configuration)
             .ReadFrom.Services(services)
             .Enrich.FromLogContext()
@@ -41,22 +44,54 @@ try
             });
 
         if (context.Configuration.GetValue<bool>("UseStdio"))
-            logConfig.WriteTo.Console(
+            cfg.WriteTo.Console(
                 outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}",
                 standardErrorFromLevel: Serilog.Events.LogEventLevel.Verbose);
     });
 
+    // Token validation — MCP server is a resource server for Auth0 tokens
+    builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+        .AddJwtBearer(options =>
+        {
+            options.Authority = $"https://{config["Auth0:Domain"]}/";
+            options.Audience  = config["Auth0:Audience"];
+            options.SaveToken = true; // required for GetTokenAsync("access_token") in ApiClient
+            options.Events = new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents
+            {
+                OnChallenge = context =>
+                {
+                    // Suppress the default challenge so we can emit the resource_metadata
+                    // parameter that MCP clients (Claude Desktop) need for OAuth discovery.
+                    context.HandleResponse();
+                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                    var host = $"{context.Request.Scheme}://{context.Request.Host}";
+                    context.Response.Headers.Append("WWW-Authenticate",
+                        $"Bearer realm=\"{host}\", " +
+                        $"resource_metadata=\"{host}/.well-known/oauth-protected-resource\"");
+                    return Task.CompletedTask;
+                }
+            };
+        });
+
+    builder.Services.AddAuthorization();
+    builder.Services.AddHttpContextAccessor();
+
+    // ApiClient — typed HTTP client; reads per-request Auth0 token via IHttpContextAccessor
     builder.Services.AddHttpClient<ApiClient>(client =>
         client.BaseAddress = new Uri("http://orderdemo-api"))
         .AddServiceDiscovery()
         .AddStandardResilienceHandler();
 
+    // Health check HTTP client — unauthenticated, used only by ApiHealthCheck
     builder.Services.AddHttpClient("health", client =>
     {
         client.Timeout = TimeSpan.FromSeconds(5);
     })
     .AddServiceDiscovery()
     .AddStandardResilienceHandler();
+
+    // Auth0ManagementService — singleton, manages its own management token lifecycle
+    builder.Services.AddSingleton<Auth0ManagementService>();
 
     builder.Services.AddHealthChecks()
         .AddCheck<ApiHealthCheck>(
@@ -77,13 +112,16 @@ try
 
     var app = builder.Build();
 
-    await app.Services.GetRequiredService<ApiClient>().InitializeAsync();
+    app.MapDefaultEndpoints();
+
+    app.UseAuthentication();
+    app.UseAuthorization();
+
+    // OAuth discovery and DCR — public, no auth required, must come before MapMcp
+    app.MapOAuthEndpoints();
 
     if (!useStdio)
-    {
-        app.MapMcp("/mcp");
-        app.MapDefaultEndpoints();
-    }
+        app.MapMcp("/mcp").RequireAuthorization();
 
     await app.RunAsync();
 }

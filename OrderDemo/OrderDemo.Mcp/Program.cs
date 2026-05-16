@@ -58,10 +58,39 @@ try
             options.SaveToken = true; // required for GetTokenAsync("access_token") in ApiClient
             options.Events = new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents
             {
+                OnMessageReceived = context =>
+                {
+                    var logger = context.HttpContext.RequestServices
+                        .GetRequiredService<ILogger<Program>>();
+                    var hasBearer = context.Request.Headers.Authorization
+                        .ToString().StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase);
+                    logger.LogInformation("[JWT] {Method} {Path} — Authorization header present: {HasBearer}",
+                        context.Request.Method, context.Request.Path, hasBearer);
+                    return Task.CompletedTask;
+                },
+                OnAuthenticationFailed = context =>
+                {
+                    var logger = context.HttpContext.RequestServices
+                        .GetRequiredService<ILogger<Program>>();
+                    logger.LogWarning("[JWT] Authentication FAILED: {Error}", context.Exception.Message);
+                    return Task.CompletedTask;
+                },
+                OnTokenValidated = context =>
+                {
+                    var logger = context.HttpContext.RequestServices
+                        .GetRequiredService<ILogger<Program>>();
+                    logger.LogInformation("[JWT] Token validated. sub={Sub} aud={Aud}",
+                        context.Principal?.FindFirst("sub")?.Value,
+                        context.Principal?.FindFirst("aud")?.Value);
+                    return Task.CompletedTask;
+                },
                 OnChallenge = context =>
                 {
-                    // Suppress the default challenge so we can emit the resource_metadata
-                    // parameter that MCP clients (Claude Desktop) need for OAuth discovery.
+                    var logger = context.HttpContext.RequestServices
+                        .GetRequiredService<ILogger<Program>>();
+                    logger.LogWarning("[JWT] Challenge issued. AuthFailure: {Failure}",
+                        context.AuthenticateFailure?.Message ?? "none (anonymous request)");
+
                     context.HandleResponse();
                     context.Response.StatusCode = StatusCodes.Status401Unauthorized;
                     var host = $"{context.Request.Scheme}://{context.Request.Host}";
@@ -121,7 +150,7 @@ try
     app.MapOAuthEndpoints();
 
     if (!useStdio)
-        app.MapMcp("/mcp").RequireAuthorization();
+        app.MapMcp().RequireAuthorization();
 
     await app.RunAsync();
 }

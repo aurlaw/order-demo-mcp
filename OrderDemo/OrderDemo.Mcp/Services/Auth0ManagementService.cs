@@ -45,45 +45,38 @@ public class Auth0ManagementService(
             "Management token refreshed, expires at {ExpiresAt}", _tokenExpiry);
     }
 
-    public async Task<JsonElement> CreateClientAsync(
-        string clientName, string[] redirectUris)
+    /// <summary>
+    /// Patches the Allowed Callback URLs of the pre-configured "Order Demo MCP" Auth0
+    /// application to include any redirect URIs sent by the MCP client (e.g. Claude Desktop).
+    /// Merges with the server's own configured callback URL so neither is lost.
+    /// Requires the Management M2M app to have the update:clients scope.
+    /// </summary>
+    public async Task UpdateClientCallbacksAsync(string clientId, string[] redirectUris)
     {
         await EnsureManagementTokenAsync();
 
-        logger.LogInformation("Creating Auth0 client for {ClientName}", clientName);
+        logger.LogInformation("Updating callbacks for Auth0 client {ClientId}", clientId);
 
-        var domain = config["Auth0:Domain"]!;
+        var domain      = config["Auth0:Domain"]!;
+        var existingUrl = config["Auth0:Mcp:CallbackUrl"]!;
+
+        // Keep the server's configured callback + whatever the MCP client sends
+        var merged = redirectUris
+            .Append(existingUrl)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
         using var httpClient = httpClientFactory.CreateClient();
         httpClient.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", _managementToken);
 
-        var response = await httpClient.PostAsJsonAsync(
-            $"https://{domain}/api/v2/clients",
-            new
-            {
-                name          = clientName,
-                app_type      = "regular_web",
-                callbacks     = redirectUris,
-                grant_types   = new[] { "authorization_code", "refresh_token" },
-                token_endpoint_auth_method = "client_secret_post",
-                oidc_conformant = true
-            });
+        var response = await httpClient.PatchAsJsonAsync(
+            $"https://{domain}/api/v2/clients/{clientId}",
+            new { callbacks = merged });
 
         response.EnsureSuccessStatusCode();
-        return await response.Content.ReadFromJsonAsync<JsonElement>();
-    }
 
-    public async Task DeleteClientAsync(string clientId)
-    {
-        await EnsureManagementTokenAsync();
-
-        logger.LogInformation("Deleting Auth0 client {ClientId}", clientId);
-
-        var domain = config["Auth0:Domain"]!;
-        using var httpClient = httpClientFactory.CreateClient();
-        httpClient.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", _managementToken);
-
-        await httpClient.DeleteAsync($"https://{domain}/api/v2/clients/{clientId}");
+        logger.LogInformation("Auth0 client {ClientId} callbacks updated: {Callbacks}",
+            clientId, string.Join(", ", merged));
     }
 }

@@ -12,7 +12,7 @@ var mcp = builder.AddProject<Projects.OrderDemo_Mcp>("orderdemo-mcp", launchProf
     .WithExternalHttpEndpoints()
     .WithReference(api)
     .WaitFor(api)
-    .WithUrlForEndpoint("http", url => url.Url = "/mcp");
+    .WithUrlForEndpoint("http", url => url.Url = "/");
 
 builder.AddJavaScriptApp("web", "../OrderDemo.Web", "dev")
     .WithHttpEndpoint(port: 5173, env: "PORT")

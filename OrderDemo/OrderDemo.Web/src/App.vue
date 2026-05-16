@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 
 const token           = ref(localStorage.getItem('token') || null)
 const isAuthenticated = computed(() => !!token.value)
@@ -12,6 +12,20 @@ const error = ref(null)
 const pagination = reactive({ page: 1, pageSize: 20, totalCount: 0, totalPages: 0 })
 const filters = reactive({ lastName: '', from: '', to: '' })
 const applied = reactive({ lastName: '', from: '', to: '' })
+
+const darkMode = ref(
+  localStorage.getItem('darkMode') === 'true' ||
+  (!localStorage.getItem('darkMode') && window.matchMedia('(prefers-color-scheme: dark)').matches)
+)
+
+watch(darkMode, val => {
+  document.documentElement.classList.toggle('dark', val)
+  localStorage.setItem('darkMode', String(val))
+}, { immediate: true })
+
+function toggleDark() {
+  darkMode.value = !darkMode.value
+}
 
 async function fetchOrders() {
   loading.value = true
@@ -151,6 +165,18 @@ onMounted(() => { if (isAuthenticated.value) fetchOrders() })
         <h1>Order Dashboard</h1>
         <div class="header-right">
           <span v-if="!loading" class="badge">{{ pagination.totalCount.toLocaleString() }} orders</span>
+          <button class="btn-ghost theme-toggle" @click="toggleDark" :title="darkMode ? 'Switch to light mode' : 'Switch to dark mode'">
+            <svg v-if="darkMode" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="5"/>
+              <line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
+              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+              <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
+              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+            </svg>
+            <svg v-else width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+            </svg>
+          </button>
           <button class="btn-ghost" @click="logout">Sign Out</button>
         </div>
       </div>
@@ -226,7 +252,7 @@ header {
 header h1 {
   font-size: 1.5rem;
   font-weight: 700;
-  color: #1e293b;
+  color: var(--text);
 }
 
 .header-right {
@@ -236,8 +262,8 @@ header h1 {
 }
 
 .badge {
-  background: #e0e7ff;
-  color: #4338ca;
+  background: var(--badge-bg);
+  color: var(--badge-text);
   font-size: 0.75rem;
   font-weight: 600;
   padding: 3px 10px;
@@ -252,9 +278,9 @@ main {
 }
 
 .card {
-  background: #fff;
+  background: var(--surface);
   border-radius: 10px;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+  box-shadow: var(--card-shadow);
   padding: 20px;
 }
 
@@ -266,18 +292,18 @@ main {
 }
 
 .filter-bar input {
-  border: 1px solid #cbd5e1;
+  border: 1px solid var(--input-border);
   border-radius: 6px;
   padding: 7px 12px;
   font-size: 0.875rem;
-  color: #1e293b;
-  background: #f8fafc;
+  color: var(--text);
+  background: var(--input-bg);
   outline: none;
 }
 
 .filter-bar input:focus {
-  border-color: #6366f1;
-  box-shadow: 0 0 0 2px rgba(99,102,241,0.15);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
 }
 
 .btn-primary, .btn-secondary {
@@ -290,12 +316,12 @@ main {
 }
 
 .btn-primary {
-  background: #6366f1;
+  background: var(--accent);
   color: #fff;
 }
 
 .btn-primary:hover {
-  background: #4f46e5;
+  background: var(--accent-hover);
 }
 
 .btn-primary:disabled {
@@ -304,33 +330,40 @@ main {
 }
 
 .btn-secondary {
-  background: #f1f5f9;
-  color: #475569;
-  border: 1px solid #cbd5e1;
+  background: var(--btn-secondary-bg);
+  color: var(--text-label);
+  border: 1px solid var(--input-border);
 }
 
 .btn-secondary:hover {
-  background: #e2e8f0;
+  background: var(--btn-secondary-hover);
 }
 
 .btn-ghost {
   background: none;
-  border: 1px solid #cbd5e1;
+  border: 1px solid var(--input-border);
   border-radius: 6px;
   padding: 6px 14px;
   font-size: 0.875rem;
-  color: #475569;
+  color: var(--text-label);
   cursor: pointer;
 }
 
 .btn-ghost:hover {
-  background: #f1f5f9;
+  background: var(--btn-ghost-hover);
+}
+
+.theme-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
 }
 
 .state-msg {
   text-align: center;
   padding: 40px;
-  color: #64748b;
+  color: var(--text-muted);
 }
 
 .state-msg.error {
@@ -354,22 +387,22 @@ thead th {
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #64748b;
-  border-bottom: 1px solid #e2e8f0;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
 }
 
 tbody tr {
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--border-subtle);
   transition: background 0.1s;
 }
 
 tbody tr:hover {
-  background: #f8fafc;
+  background: var(--row-hover);
 }
 
 tbody td {
   padding: 11px 14px;
-  color: #334155;
+  color: var(--text-secondary);
   vertical-align: middle;
 }
 
@@ -379,7 +412,7 @@ tbody td {
 }
 
 .muted {
-  color: #94a3b8;
+  color: var(--text-faint);
 }
 
 .right {
@@ -396,8 +429,8 @@ tbody td {
 
 .pill {
   display: inline-block;
-  background: #f1f5f9;
-  color: #475569;
+  background: var(--pill-bg);
+  color: var(--pill-text);
   font-size: 0.75rem;
   font-weight: 600;
   padding: 2px 8px;
@@ -407,7 +440,7 @@ tbody td {
 .empty {
   text-align: center;
   padding: 40px;
-  color: #94a3b8;
+  color: var(--text-faint);
 }
 
 .pagination {
@@ -422,22 +455,22 @@ tbody td {
   min-width: 34px;
   height: 34px;
   border-radius: 6px;
-  border: 1px solid #e2e8f0;
-  background: #fff;
-  color: #374151;
+  border: 1px solid var(--border);
+  background: var(--pagination-bg);
+  color: var(--text-secondary);
   font-size: 0.875rem;
   cursor: pointer;
   padding: 0 8px;
 }
 
 .pagination button:hover:not(:disabled):not(.active) {
-  background: #f1f5f9;
+  background: var(--pagination-hover);
 }
 
 .pagination button.active {
-  background: #6366f1;
+  background: var(--accent);
   color: #fff;
-  border-color: #6366f1;
+  border-color: var(--accent);
   font-weight: 600;
 }
 
@@ -447,14 +480,14 @@ tbody td {
 }
 
 .ellipsis {
-  color: #94a3b8;
+  color: var(--text-faint);
   padding: 0 4px;
 }
 
 .page-label {
   margin-left: 8px;
   font-size: 0.8125rem;
-  color: #64748b;
+  color: var(--text-muted);
 }
 
 /* Login */
@@ -466,8 +499,8 @@ tbody td {
 }
 
 .login-card {
-  background: #fff;
-  border: 1px solid #e2e8f0;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 40px;
   width: 100%;
@@ -477,12 +510,12 @@ tbody td {
 .login-card h1 {
   font-size: 22px;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--text);
   margin-bottom: 4px;
 }
 
 .login-subtitle {
-  color: #64748b;
+  color: var(--text-muted);
   font-size: 14px;
   margin-bottom: 28px;
 }
@@ -497,7 +530,7 @@ tbody td {
 .field label {
   font-size: 12px;
   font-weight: 500;
-  color: #64748b;
+  color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -505,16 +538,17 @@ tbody td {
 .field input {
   height: 40px;
   padding: 0 12px;
-  border: 1px solid #cbd5e1;
+  border: 1px solid var(--input-border);
   border-radius: 6px;
   font-size: 14px;
-  color: #1e293b;
+  color: var(--text);
+  background: var(--input-bg);
   outline: none;
   transition: border-color 0.15s;
 }
 
 .field input:focus {
-  border-color: #6366f1;
+  border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
 }
 
